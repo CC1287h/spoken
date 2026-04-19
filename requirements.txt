@@ -1,0 +1,10 @@
+numpy
+scipy
+librosa
+soundfile
+matplotlib
+PyWavelets
+pandas
+tqdm
+pesq
+pystoi
