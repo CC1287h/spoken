@@ -1,0 +1,385 @@
+import numpy as np
+import sounddevice as sd
+import torch
+import torch.nn.functional as F
+from tqdm import tqdm
+
+from datetime import datetime
+import librosa
+import pandas as pd
+from pathlib import Path
+import pesq
+import pystoi
+
+from model import UNet
+from dataset import DatasetConfig, get_dataloaders, load_subset
+
+
+def istft_reconstruct(complex_spec):
+    win_type = DatasetConfig.window.lower()
+    if win_type == "hann":
+        window = torch.hann_window(DatasetConfig.n_fft, device=complex_spec.device)
+    elif win_type == "hamming":
+        window = torch.hamming_window(DatasetConfig.n_fft, device=complex_spec.device)
+    elif win_type  == "rectangular":
+        window = torch.ones(DatasetConfig.n_fft, device=complex_spec.device)
+    else:
+        raise ValueError(f"Unknown window type: {DatasetConfig.window}")
+
+    wav = torch.istft(
+        complex_spec,
+        n_fft=DatasetConfig.n_fft,
+        hop_length=DatasetConfig.hop_length,
+        win_length=DatasetConfig.win_length,
+        window=window,
+        length=None
+    )
+    return wav
+
+
+def si_sdr_loss(pred, target, eps=1e-12, reduction="mean"):
+    # pred, target: (B, T)
+
+    pred = pred - pred.mean(dim=1, keepdim=True)
+    target = target - target.mean(dim=1, keepdim=True)
+
+    # projection
+    dot = torch.sum(pred * target, dim=1, keepdim=True)
+    target_energy = torch.sum(target ** 2, dim=1, keepdim=True) + eps
+
+    scale = dot / target_energy
+    proj = scale * target
+
+    noise = pred - proj
+
+    ratio = torch.sum(proj ** 2, dim=1) / (torch.sum(noise ** 2, dim=1) + eps)
+
+    si_sdr = 10 * torch.log10(ratio + eps)
+
+    loss = -si_sdr
+
+    if reduction == "mean":
+        return loss.mean()
+    elif reduction == "none":
+        return loss
+    else:
+        raise ValueError("reduction must be 'mean' or 'none'")
+    
+
+def compute_snr_batch(clean, test, eps=1e-12):
+    # clean, test: [B, T]
+
+    clean = clean - clean.mean(dim=1, keepdim=True)
+    test = test - test.mean(dim=1, keepdim=True)
+
+    noise = test - clean
+
+    signal_power = torch.sum(clean ** 2, dim=1)
+    noise_power = torch.sum(noise ** 2, dim=1)
+
+    snr = 10 * torch.log10(signal_power / (noise_power + eps))
+    return snr
+
+
+def align_signals(*signals: np.ndarray) -> tuple[np.ndarray, ...]:
+    min_length = min(len(signal) for signal in signals)
+    return tuple(np.asarray(signal[:min_length], dtype=np.float32) for signal in signals)
+
+
+def normalize(x: np.ndarray, eps: float=1e-12):
+    return x / (np.max(np.abs(x)) + eps)
+
+
+def compute_snr(clean: np.ndarray, estimate: np.ndarray, eps: float=1e-12):
+    noise = clean - estimate
+    return 10 * np.log10(
+        np.sum(clean ** 2) / (np.sum(noise ** 2) + eps)
+    )
+
+
+def compute_mae(clean: np.ndarray, estimate: np.ndarray):
+    return np.mean(np.abs(clean - estimate))
+
+
+def compute_mse(clean: np.ndarray, estimate: np.ndarray):
+    return np.mean((clean - estimate) ** 2)
+
+
+def compute_rmse(clean: np.ndarray, estimate: np.ndarray):
+    return np.sqrt(compute_mse(clean, estimate))
+
+
+def _resample_for_perceptual_metric(clean: np.ndarray, estimate: np.ndarray, sample_rate: int, target_rate: int = 16000):
+    clean, estimate = align_signals(clean, estimate)
+
+    if sample_rate != target_rate:
+        clean = librosa.resample(clean, orig_sr=sample_rate, target_sr=target_rate)
+        estimate = librosa.resample(estimate, orig_sr=sample_rate, target_sr=target_rate)
+
+    return clean.astype(np.float32), estimate.astype(np.float32), target_rate
+
+
+def compute_pesq(clean: np.ndarray, estimate: np.ndarray, sample_rate: int):
+    try:
+        clean_16k, est_16k, sr = _resample_for_perceptual_metric(
+            clean, estimate, sample_rate
+        )
+        return float(pesq.pesq(sr, clean_16k, est_16k, "wb"))
+    except Exception:
+        return None
+
+
+def compute_stoi(clean: np.ndarray, estimate: np.ndarray, sample_rate: int):
+    try:
+        clean_16k, est_16k, sr = _resample_for_perceptual_metric(
+            clean, estimate, sample_rate
+        )
+        return float(pystoi.stoi(clean_16k, est_16k, sr, extended=False))
+    except Exception:
+        return None
+
+
+def save_to_csv(df, path):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        df.to_csv(path, index=False)
+        return path
+    except PermissionError:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        fallback = path.with_name(f"{path.stem}_{ts}.csv")
+        df.to_csv(fallback, index=False)
+        return fallback
+
+
+# evaluation + playback
+@torch.no_grad()
+def evaluate_and_play(model, test_loader, device, num_examples=4, lambda1=1.0, lambda2=0.1, lambda3=1.0):
+    model.eval()
+
+    examples = 0
+
+    for noisy, clean, phase, mask, _ in test_loader:
+        noisy = noisy.to(device)
+        clean = clean.to(device)
+        phase = phase.to(device)
+        mask = mask.to(device)
+
+        pred_mask = model(noisy)
+        enhanced = pred_mask * noisy
+
+        noisy = noisy.squeeze(1)
+        enhanced = enhanced.squeeze(1)
+        clean = clean.squeeze(1)
+        phase = phase.squeeze(1)
+
+        noisy_complex = torch.complex(
+            noisy * torch.cos(phase),
+            noisy * torch.sin(phase)
+        )
+        enhanced_complex = torch.complex(
+            enhanced * torch.cos(phase),
+            enhanced * torch.sin(phase)
+        )
+        clean_complex = torch.complex(
+            clean * torch.cos(phase),
+            clean * torch.sin(phase)
+        )
+
+        noisy_wave = istft_reconstruct(noisy_complex)
+        enhanced_wave = istft_reconstruct(enhanced_complex)
+        clean_wave = istft_reconstruct(clean_complex)
+
+        enhanced_mag = torch.abs(enhanced_complex)
+        clean_mag = torch.abs(clean_complex)
+
+        enhanced_log = torch.log(enhanced_mag + EPS)
+        clean_log = torch.log(clean_mag + EPS)
+
+        sisdr_loss_per_sample  = si_sdr_loss(enhanced_wave, clean_wave, EPS, reduction="none")
+        sisdr_loss = sisdr_loss_per_sample.mean()
+
+        spec_loss_map = torch.abs(enhanced_log - clean_log)
+        spec_loss_map = spec_loss_map * mask
+        spec_loss_per_sample = (
+            spec_loss_map.sum(dim=(1,2,3)) /
+            (mask.sum(dim=(1,2,3)) + EPS)
+        )
+        spec_loss = spec_loss_map.sum() / mask.sum()
+
+        complex_loss_map = torch.abs(enhanced_complex - clean_complex)
+        complex_loss_per_sample = torch.mean(
+            complex_loss_map,
+            dim=(1, 2)
+            )
+        complex_loss = torch.mean(complex_loss_map)
+
+        loss = lambda1 * sisdr_loss + lambda2 * spec_loss + lambda3 * complex_loss 
+
+        print(f"\nbatch loss: {loss.item():.4f}")
+
+        snr_noisy_batch = compute_snr_batch(clean_wave, noisy_wave, EPS)
+        snr_enh_batch = compute_snr_batch(clean_wave, enhanced_wave, EPS)
+        snr_improve_batch = snr_enh_batch - snr_noisy_batch
+
+        print(f"Avg ΔSNR:   {snr_improve_batch.mean():.4f}")
+
+        # 取 batch 中一个样本播放
+        for i in range(noisy.shape[0]):
+
+            noisy_wav = noisy_wave[i].cpu().numpy()
+            clean_wav = clean_wave[i].cpu().numpy()
+            enh_wav = enhanced_wave[i].cpu().numpy()
+
+            noisy_wav = normalize(noisy_wav)
+            clean_wav = normalize(clean_wav)
+            enh_wav = normalize(enh_wav)
+
+            print(f"\nsample {examples+1}:")
+
+            print("  Playing Noisy...")
+            sd.play(noisy_wav, samplerate=DatasetConfig.sample_rate)
+            sd.wait()
+
+            print("  Playing Enhanced...")
+            sd.play(enh_wav, samplerate=DatasetConfig.sample_rate)
+            sd.wait()
+
+            print("  Playing Clean...")
+            sd.play(clean_wav, samplerate=DatasetConfig.sample_rate)
+            sd.wait()
+
+            print(f"  SI-SDR loss: {sisdr_loss_per_sample[i].item():.4f}")
+            print(f"  Spec loss:   {spec_loss_per_sample[i].item():.4f}")
+            print(f"  Comp loss:   {complex_loss_per_sample[i].item():.4f}")
+            print(f"  SNR noisy:   {snr_noisy_batch[i].item():.2f} dB")
+            print(f"  SNR enhced:  {snr_enh_batch[i].item():.2f} dB")
+            print(f"  ΔSNR:        {snr_improve_batch[i].item():.2f} dB")
+
+            examples += 1
+            if examples >= num_examples:
+                return
+
+
+@torch.no_grad()
+def evaluate_full(model, test_loader, device, sample_rate, eps=1e-12):
+    model.eval()
+
+    results = []
+
+    for noisy, clean, phase, _, _ in tqdm(test_loader, desc="Full Eval"):
+        noisy = noisy.to(device)
+        clean = clean.to(device)
+        phase = phase.to(device)
+
+        # forward
+        pred_mask = model(noisy)
+        enhanced = pred_mask * noisy
+
+        noisy = noisy.squeeze(1)
+        clean = clean.squeeze(1)
+        enhanced = enhanced.squeeze(1)
+        phase = phase.squeeze(1)
+
+        # complex reconstruction
+        noisy_complex = torch.complex(
+            noisy * torch.cos(phase),
+            noisy * torch.sin(phase)
+        )
+        clean_complex = torch.complex(
+            clean * torch.cos(phase),
+            clean * torch.sin(phase)
+        )
+        enhanced_complex = torch.complex(
+            enhanced * torch.cos(phase),
+            enhanced * torch.sin(phase)
+        )
+
+        # waveform
+        noisy_wave = istft_reconstruct(noisy_complex)
+        clean_wave = istft_reconstruct(clean_complex)
+        enh_wave = istft_reconstruct(enhanced_complex)
+
+        B = noisy_wave.shape[0]
+
+        for i in range(B):
+            clean_wav = clean_wave[i].cpu().numpy()
+            noisy_wav = noisy_wave[i].cpu().numpy()
+            enh_wav = enh_wave[i].cpu().numpy()
+
+            # normalize
+            clean_wav = normalize(clean_wav, eps)
+            noisy_wav = normalize(noisy_wav, eps)
+            enh_wav = normalize(enh_wav, eps)
+
+            # metrics
+            snr_noisy = compute_snr(clean_wav, noisy_wav, eps)
+            snr_enh = compute_snr(clean_wav, enh_wav, eps)
+
+            row = {
+                "snr_noisy": snr_noisy,
+                "snr_enh": snr_enh,
+                "snr_improve": snr_enh - snr_noisy,
+
+                "mae": compute_mae(clean_wav, enh_wav),
+                "mse": compute_mse(clean_wav, enh_wav),
+                "rmse": compute_rmse(clean_wav, enh_wav),
+                "pesq": compute_pesq(clean_wav, enh_wav, sample_rate),
+                "stoi": compute_stoi(clean_wav, enh_wav, sample_rate),
+            }
+
+            results.append(row)
+
+    # dataframe
+    df = pd.DataFrame(results)
+
+    summary = df.mean(numeric_only=True).to_dict()
+
+    print("\n===== FINAL RESULTS =====")
+    print(f"SNR:   {summary['snr_enh']:.3f}")
+    print(f"ΔSNR:  {summary['snr_improve']:.3f}")
+    print(f"MAE:   {summary['mae']:.6f}")
+    print(f"MSE:   {summary['mse']:.6f}")
+    print(f"RMSE:  {summary['rmse']:.6f}")
+    print(f"PESQ:  {summary['pesq']:.6f}")
+    print(f"STOI:  {summary['stoi']:.6f}")
+
+    return df, summary
+
+
+# main
+def main():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    subset = load_subset(
+        DatasetConfig.test_txt,
+        noise_type=None,
+        snr=12.5
+    )
+
+    _, test_loader = get_dataloaders(
+        # test_files=subset,
+        batch_size=BATCH_SIZE,
+        num_workers=NUM_WORKERS
+    )
+
+    model = UNet().to(device)
+    model.load_state_dict(torch.load("ckpt/best_model_mag.pth", map_location=device))
+
+    print("Loaded best model")
+
+    # evaluate_and_play(model, test_loader, device)
+    # evaluate_full(model, test_loader, device, EPS)
+
+    df, summary = evaluate_full(model, test_loader, device, sample_rate=DatasetConfig.sample_rate)
+
+    # save_to_csv(df, "results/eval_full.csv")
+
+
+if __name__ == "__main__":
+    BATCH_SIZE = 4
+    NUM_WORKERS = 4
+    EPS = 1e-12
+
+    main()
