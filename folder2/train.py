@@ -72,34 +72,37 @@ def si_sdr_loss(pred, target, eps=1e-12, reduction="mean"):
         raise ValueError("reduction must be 'mean' or 'none'")
 
 
-# ===== 训练函数 =====
-def train_epoch(model, train_loader, optimizer, device, lambda1=1.0, lambda2=0.5, lambda3=0.1):
+# ===== train a epoch =====
+def train_epoch(model, train_loader, optimizer, device,
+                lambda1=1.0, lambda2=0.5, lambda3=0.1, eps=1e-12):
     model.train()
     total_loss = 0
 
     for noisy, clean, mask, _ in tqdm(train_loader, desc="Train"):
         noisy = noisy.to(device)
         clean = clean.to(device)
+        mask = mask.to(device)
 
-        # 前向
+        # forward
         pred_mask = model(noisy)
         pred_mask = pred_mask.squeeze(1)
 
+        # complex
         noisy_complex = torch.complex(noisy[:, 0], noisy[:, 1])
         clean_complex = torch.complex(clean[:, 0], clean[:, 1])
-
         enhanced_complex = pred_mask * noisy_complex
 
+        # waveform
         enhanced_wave = istft_reconstruct(enhanced_complex)
         clean_wave = istft_reconstruct(clean_complex)
 
         enhanced_mag = torch.abs(enhanced_complex)
         clean_mag = torch.abs(clean_complex)
 
-        enhanced_log = torch.log(enhanced_mag + EPS)
-        clean_log = torch.log(clean_mag + EPS)
+        enhanced_log = torch.log(enhanced_mag + eps)
+        clean_log = torch.log(clean_mag + eps)
 
-        sisdr_loss  = si_sdr_loss(enhanced_wave, clean_wave, EPS)
+        sisdr_loss  = si_sdr_loss(enhanced_wave, clean_wave, eps)
 
         spec_loss = torch.abs(enhanced_log - clean_log)
         spec_loss = spec_loss * mask
@@ -109,7 +112,7 @@ def train_epoch(model, train_loader, optimizer, device, lambda1=1.0, lambda2=0.5
 
         loss = lambda1 * sisdr_loss + lambda2 * spec_loss + lambda3 * complex_loss 
 
-        # 反向
+        # backward
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -119,21 +122,23 @@ def train_epoch(model, train_loader, optimizer, device, lambda1=1.0, lambda2=0.5
     return total_loss / len(train_loader)
 
 
-# ===== 验证函数 =====
+# ===== evaluate =====
 @torch.no_grad()
-def evaluate(model, test_loader, device, lambda1=1.0, lambda2=0.5, lambda3=0.1):
+def evaluate(model, test_loader, device,
+             lambda1=1.0, lambda2=0.5, lambda3=0.1, eps=1e-12):
     model.eval()
     total_loss = 0
 
     for noisy, clean, mask, _ in tqdm(test_loader, desc="Eval"):
         noisy = noisy.to(device)
         clean = clean.to(device)
+        mask = mask.to(device)
 
         pred_mask = model(noisy)
         pred_mask = pred_mask.squeeze(1)
 
-        noisy_complex = torch.complex(noisy[:, 0], noisy[:, 1])
-        clean_complex = torch.complex(clean[:, 0], clean[:, 1])
+        noisy_complex = torch.complex(noisy[:, 0], noisy[:, 1]).to(device)
+        clean_complex = torch.complex(clean[:, 0], clean[:, 1]).to(device)
 
         enhanced_complex = pred_mask * noisy_complex
 
@@ -143,14 +148,14 @@ def evaluate(model, test_loader, device, lambda1=1.0, lambda2=0.5, lambda3=0.1):
         enhanced_mag = torch.abs(enhanced_complex)
         clean_mag = torch.abs(clean_complex)
 
-        enhanced_log = torch.log(enhanced_mag + EPS)
-        clean_log = torch.log(clean_mag + EPS)
+        enhanced_log = torch.log(enhanced_mag + eps)
+        clean_log = torch.log(clean_mag + eps)
 
-        sisdr_loss  = si_sdr_loss(enhanced_wave, clean_wave, EPS)
+        sisdr_loss  = si_sdr_loss(enhanced_wave, clean_wave, eps)
 
-        loss_map  = torch.abs(enhanced_log - clean_log)
-        loss_map  = loss_map * mask
-        spec_loss = loss_map .sum() / mask.sum()
+        spec_loss = torch.abs(enhanced_log - clean_log)
+        spec_loss = spec_loss * mask
+        spec_loss = spec_loss.sum() / mask.sum()
 
         complex_loss = torch.mean(torch.abs(enhanced_complex - clean_complex))
 
@@ -161,20 +166,20 @@ def evaluate(model, test_loader, device, lambda1=1.0, lambda2=0.5, lambda3=0.1):
     return total_loss / len(test_loader)
 
 
-# ===== 训练主循环 =====
-def train(model, train_loader, test_loader, optimizer, device):
+# ===== train =====
+def train(model, train_loader, test_loader, optimizer, device, eps=1e-12):
     best_loss = float("inf")
 
     for epoch in range(EPOCHS):
         print(f"\n===== Epoch {epoch+1}/{EPOCHS} =====")
 
-        train_loss = train_epoch(model, train_loader, optimizer, device)
-        val_loss = evaluate(model, test_loader, device)
+        train_loss = train_epoch(model, train_loader, optimizer, device, eps)
+        val_loss = evaluate(model, test_loader, device, eps)
 
         print(f"Train Loss: {train_loss:.4f}")
         print(f"Val Loss:   {val_loss:.4f}")
 
-        # ===== 保存模型 =====
+        # ===== save best model =====
         if val_loss < best_loss:
             best_loss = val_loss
             os.makedirs("ckpt", exist_ok=True)
@@ -195,11 +200,11 @@ def main():
 
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 
-    train(model, train_loader, test_loader, optimizer, device)
+    train(model, train_loader, test_loader, optimizer, device, EPS)
 
 
 if __name__ == "__main__":
-    BATCH_SIZE = 2
+    BATCH_SIZE = 8
     NUM_WORKERS = 4
     LR = 1e-3
     EPOCHS = 10

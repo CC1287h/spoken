@@ -155,7 +155,8 @@ def save_to_csv(df, path):
 
 # evaluation + playback
 @torch.no_grad()
-def evaluate_and_play(model, test_loader, device, num_examples=4, lambda1=1.0, lambda2=0.1, lambda3=1.0):
+def evaluate_and_play(model, test_loader, device, num_examples=4,
+                      lambda1=1.0, lambda2=0.1, lambda3=1.0, eps=1e-12):
     model.eval()
 
     examples = 0
@@ -166,6 +167,7 @@ def evaluate_and_play(model, test_loader, device, num_examples=4, lambda1=1.0, l
         phase = phase.to(device)
         mask = mask.to(device)
 
+        # forward
         pred_mask = model(noisy)
         enhanced = pred_mask * noisy
 
@@ -174,6 +176,7 @@ def evaluate_and_play(model, test_loader, device, num_examples=4, lambda1=1.0, l
         clean = clean.squeeze(1)
         phase = phase.squeeze(1)
 
+        # complex
         noisy_complex = torch.complex(
             noisy * torch.cos(phase),
             noisy * torch.sin(phase)
@@ -187,6 +190,7 @@ def evaluate_and_play(model, test_loader, device, num_examples=4, lambda1=1.0, l
             clean * torch.sin(phase)
         )
 
+        # waveform
         noisy_wave = istft_reconstruct(noisy_complex)
         enhanced_wave = istft_reconstruct(enhanced_complex)
         clean_wave = istft_reconstruct(clean_complex)
@@ -194,17 +198,17 @@ def evaluate_and_play(model, test_loader, device, num_examples=4, lambda1=1.0, l
         enhanced_mag = torch.abs(enhanced_complex)
         clean_mag = torch.abs(clean_complex)
 
-        enhanced_log = torch.log(enhanced_mag + EPS)
-        clean_log = torch.log(clean_mag + EPS)
+        enhanced_log = torch.log(enhanced_mag + eps)
+        clean_log = torch.log(clean_mag + eps)
 
-        sisdr_loss_per_sample  = si_sdr_loss(enhanced_wave, clean_wave, EPS, reduction="none")
+        sisdr_loss_per_sample  = si_sdr_loss(enhanced_wave, clean_wave, eps, reduction="none")
         sisdr_loss = sisdr_loss_per_sample.mean()
 
         spec_loss_map = torch.abs(enhanced_log - clean_log)
         spec_loss_map = spec_loss_map * mask
         spec_loss_per_sample = (
             spec_loss_map.sum(dim=(1,2,3)) /
-            (mask.sum(dim=(1,2,3)) + EPS)
+            (mask.sum(dim=(1,2,3)) + eps)
         )
         spec_loss = spec_loss_map.sum() / mask.sum()
 
@@ -219,35 +223,34 @@ def evaluate_and_play(model, test_loader, device, num_examples=4, lambda1=1.0, l
 
         print(f"\nbatch loss: {loss.item():.4f}")
 
-        snr_noisy_batch = compute_snr_batch(clean_wave, noisy_wave, EPS)
-        snr_enh_batch = compute_snr_batch(clean_wave, enhanced_wave, EPS)
+        snr_noisy_batch = compute_snr_batch(clean_wave, noisy_wave, eps)
+        snr_enh_batch = compute_snr_batch(clean_wave, enhanced_wave, eps)
         snr_improve_batch = snr_enh_batch - snr_noisy_batch
 
         print(f"Avg ΔSNR:   {snr_improve_batch.mean():.4f}")
 
-        # 取 batch 中一个样本播放
         for i in range(noisy.shape[0]):
 
-            noisy_wav = noisy_wave[i].cpu().numpy()
-            clean_wav = clean_wave[i].cpu().numpy()
-            enh_wav = enhanced_wave[i].cpu().numpy()
+            noisy_wave_i = noisy_wave[i].cpu().numpy()
+            clean_wave_i = clean_wave[i].cpu().numpy()
+            enhanced_wave_i = enhanced_wave[i].cpu().numpy()
 
-            noisy_wav = normalize(noisy_wav)
-            clean_wav = normalize(clean_wav)
-            enh_wav = normalize(enh_wav)
+            noisy_wave_i = normalize(noisy_wave_i)
+            clean_wave_i = normalize(clean_wave_i)
+            enhanced_wave_i = normalize(enhanced_wave_i)
 
             print(f"\nsample {examples+1}:")
 
             print("  Playing Noisy...")
-            sd.play(noisy_wav, samplerate=DatasetConfig.sample_rate)
+            sd.play(noisy_wave_i, samplerate=DatasetConfig.sample_rate)
             sd.wait()
 
             print("  Playing Enhanced...")
-            sd.play(enh_wav, samplerate=DatasetConfig.sample_rate)
+            sd.play(enhanced_wave_i, samplerate=DatasetConfig.sample_rate)
             sd.wait()
 
             print("  Playing Clean...")
-            sd.play(clean_wav, samplerate=DatasetConfig.sample_rate)
+            sd.play(clean_wave_i, samplerate=DatasetConfig.sample_rate)
             sd.wait()
 
             print(f"  SI-SDR loss: {sisdr_loss_per_sample[i].item():.4f}")
@@ -282,7 +285,7 @@ def evaluate_full(model, test_loader, device, sample_rate, eps=1e-12):
         enhanced = enhanced.squeeze(1)
         phase = phase.squeeze(1)
 
-        # complex reconstruction
+        # complex
         noisy_complex = torch.complex(
             noisy * torch.cos(phase),
             noisy * torch.sin(phase)
@@ -299,34 +302,34 @@ def evaluate_full(model, test_loader, device, sample_rate, eps=1e-12):
         # waveform
         noisy_wave = istft_reconstruct(noisy_complex)
         clean_wave = istft_reconstruct(clean_complex)
-        enh_wave = istft_reconstruct(enhanced_complex)
+        enhanced_wave = istft_reconstruct(enhanced_complex)
 
         B = noisy_wave.shape[0]
 
         for i in range(B):
-            clean_wav = clean_wave[i].cpu().numpy()
-            noisy_wav = noisy_wave[i].cpu().numpy()
-            enh_wav = enh_wave[i].cpu().numpy()
+            clean_wave_i = clean_wave[i].cpu().numpy()
+            noisy_wave_i = noisy_wave[i].cpu().numpy()
+            enhanced_wave_i = enhanced_wave[i].cpu().numpy()
 
             # normalize
-            clean_wav = normalize(clean_wav, eps)
-            noisy_wav = normalize(noisy_wav, eps)
-            enh_wav = normalize(enh_wav, eps)
+            clean_wave_i = normalize(clean_wave_i, eps)
+            noisy_wave_i = normalize(noisy_wave_i, eps)
+            enhanced_wave_i = normalize(enhanced_wave_i, eps)
 
             # metrics
-            snr_noisy = compute_snr(clean_wav, noisy_wav, eps)
-            snr_enh = compute_snr(clean_wav, enh_wav, eps)
+            snr_noisy = compute_snr(clean_wave_i, noisy_wave_i, eps)
+            snr_enh = compute_snr(clean_wave_i, enhanced_wave_i, eps)
 
             row = {
                 "snr_noisy": snr_noisy,
                 "snr_enh": snr_enh,
                 "snr_improve": snr_enh - snr_noisy,
 
-                "mae": compute_mae(clean_wav, enh_wav),
-                "mse": compute_mse(clean_wav, enh_wav),
-                "rmse": compute_rmse(clean_wav, enh_wav),
-                "pesq": compute_pesq(clean_wav, enh_wav, sample_rate),
-                "stoi": compute_stoi(clean_wav, enh_wav, sample_rate),
+                "mae": compute_mae(clean_wave_i, enhanced_wave_i),
+                "mse": compute_mse(clean_wave_i, enhanced_wave_i),
+                "rmse": compute_rmse(clean_wave_i, enhanced_wave_i),
+                "pesq": compute_pesq(clean_wave_i, enhanced_wave_i, sample_rate),
+                "stoi": compute_stoi(clean_wave_i, enhanced_wave_i, sample_rate),
             }
 
             results.append(row)
@@ -337,8 +340,8 @@ def evaluate_full(model, test_loader, device, sample_rate, eps=1e-12):
     summary = df.mean(numeric_only=True).to_dict()
 
     print("\n===== FINAL RESULTS =====")
-    print(f"SNR:   {summary['snr_enh']:.3f}")
-    print(f"ΔSNR:  {summary['snr_improve']:.3f}")
+    print(f"SNR:   {summary['snr_enh']:.6f}")
+    print(f"ΔSNR:  {summary['snr_improve']:.6f}")
     print(f"MAE:   {summary['mae']:.6f}")
     print(f"MSE:   {summary['mse']:.6f}")
     print(f"RMSE:  {summary['rmse']:.6f}")
@@ -369,11 +372,11 @@ def main():
 
     print("Loaded best model")
 
-    # evaluate_and_play(model, test_loader, device)
+    # evaluate_and_play(model, test_loader, device, eps=EPS)
 
-    df, summary = evaluate_full(model, test_loader, device, sample_rate=DatasetConfig.sample_rate)
+    df, summary = evaluate_full(model, test_loader, device, DatasetConfig.sample_rate, EPS)
 
-    save_to_csv(df, "results/eval_full_mag.csv")
+    # save_to_csv(df, "results/eval_full_mag.csv")
 
 
 if __name__ == "__main__":

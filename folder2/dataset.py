@@ -229,7 +229,7 @@ def get_dataloaders(
     test_noisy_dir=DatasetConfig.test_noisy_dir,
     train_files=None,
     test_files=None,
-    batch_size=2,
+    batch_size=8,
     num_workers=4
 ):
     train_dataset = SpeechDataset(train_clean_dir, train_noisy_dir, train_files)
