@@ -385,7 +385,7 @@ def main():
 
 
 if __name__ == "__main__":
-    BATCH_SIZE = 4
+    BATCH_SIZE = 8
     NUM_WORKERS = 4
     EPS = 1e-12
 
