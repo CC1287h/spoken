@@ -74,7 +74,7 @@ def si_sdr_loss(pred, target, eps=1e-12, reduction="mean"):
 
 # ===== train a epoch =====
 def train_epoch(model, train_loader, optimizer, device,
-                lambda1=1.0, lambda2=0.1, lambda3=1.0, eps=1e-12):
+                lambda1=1.0, lambda2=0.005, lambda3=0.0, eps=1e-12):
     model.train()
     total_loss = 0
 
@@ -120,7 +120,7 @@ def train_epoch(model, train_loader, optimizer, device,
 
         complex_loss = torch.mean(torch.abs(enhanced_complex - clean_complex))
 
-        loss = lambda1 * sisdr_loss + lambda2 * spec_loss + lambda3 * complex_loss 
+        loss = lambda1 * sisdr_loss + lambda2 * spec_loss + lambda3 * complex_loss
 
         # backward
         optimizer.zero_grad()
@@ -135,8 +135,7 @@ def train_epoch(model, train_loader, optimizer, device,
 # ===== evaluate =====
 @torch.no_grad()
 def evaluate(model, test_loader, device,
-             lambda1=1.0, lambda2=0.1, lambda3=1.0,
-             eps=1e-12):
+             lambda1=1.0, lambda2=0.005, lambda3=0.0, eps=1e-12):
     model.eval()
     total_loss = 0
 
@@ -182,7 +181,7 @@ def evaluate(model, test_loader, device,
 
         complex_loss = torch.mean(torch.abs(enhanced_complex - clean_complex))
 
-        loss = lambda1 * sisdr_loss + lambda2 * spec_loss + lambda3 * complex_loss 
+        loss = lambda1 * sisdr_loss + lambda2 * spec_loss + lambda3 * complex_loss
 
         total_loss += loss.item()
 

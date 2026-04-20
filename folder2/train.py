@@ -74,7 +74,7 @@ def si_sdr_loss(pred, target, eps=1e-12, reduction="mean"):
 
 # ===== train a epoch =====
 def train_epoch(model, train_loader, optimizer, device,
-                lambda1=1.0, lambda2=0.5, lambda3=0.1, eps=1e-12):
+                lambda1=1.0, lambda2=0.005, lambda3=5.0, eps=1e-12):
     model.train()
     total_loss = 0
 
@@ -108,9 +108,16 @@ def train_epoch(model, train_loader, optimizer, device,
         spec_loss = spec_loss * mask
         spec_loss = spec_loss.sum() / mask.sum()
 
-        complex_loss = torch.mean(torch.abs(enhanced_complex - clean_complex))
+        num = torch.real(enhanced_complex * torch.conj(clean_complex))
+        den = torch.abs(enhanced_complex) * torch.abs(clean_complex) + eps
+        phase_loss = 1 - (num / den)
+        phase_loss = phase_loss.mean()
+        mag_gt = torch.abs(clean_complex)
+        phase_mask = (mag_gt > mag_gt.mean()).float()
+        phase_loss = phase_loss * phase_mask
+        phase_loss = phase_loss.sum() / (phase_mask.sum() + eps)
 
-        loss = lambda1 * sisdr_loss + lambda2 * spec_loss + lambda3 * complex_loss 
+        loss = lambda1 * sisdr_loss + lambda2 * spec_loss + lambda3 * phase_loss
 
         # backward
         optimizer.zero_grad()
@@ -125,7 +132,7 @@ def train_epoch(model, train_loader, optimizer, device,
 # ===== evaluate =====
 @torch.no_grad()
 def evaluate(model, test_loader, device,
-             lambda1=1.0, lambda2=0.5, lambda3=0.1, eps=1e-12):
+             lambda1=1.0, lambda2=0.005, lambda3=5.0, eps=1e-12):
     model.eval()
     total_loss = 0
 
@@ -157,9 +164,16 @@ def evaluate(model, test_loader, device,
         spec_loss = spec_loss * mask
         spec_loss = spec_loss.sum() / mask.sum()
 
-        complex_loss = torch.mean(torch.abs(enhanced_complex - clean_complex))
+        num = torch.real(enhanced_complex * torch.conj(clean_complex))
+        den = torch.abs(enhanced_complex) * torch.abs(clean_complex) + eps
+        phase_loss = 1 - (num / den)
+        phase_loss = phase_loss.mean()
+        mag_gt = torch.abs(clean_complex)
+        phase_mask = (mag_gt > mag_gt.mean()).float()
+        phase_loss = phase_loss * phase_mask
+        phase_loss = phase_loss.sum() / (phase_mask.sum() + eps)
 
-        loss = lambda1 * sisdr_loss + lambda2 * spec_loss + lambda3 * complex_loss 
+        loss = lambda1 * sisdr_loss + lambda2 * spec_loss + lambda3 * phase_loss
 
         total_loss += loss.item()
 

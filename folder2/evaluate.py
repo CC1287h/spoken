@@ -156,7 +156,7 @@ def save_to_csv(df, path):
 # evaluation + playback
 @torch.no_grad()
 def evaluate_and_play(model, test_loader, device, num_examples=4,
-                      lambda1=1.0, lambda2=0.5, lambda3=0.1, eps=1e-12):
+                      lambda1=1.0, lambda2=0.005, lambda3=5, eps=1e-12):
     model.eval()
 
     examples = 0
@@ -197,14 +197,18 @@ def evaluate_and_play(model, test_loader, device, num_examples=4,
         )
         spec_loss = spec_loss_map.sum() / mask.sum()
 
-        complex_loss_map = torch.abs(enhanced_complex - clean_complex)
-        complex_loss_per_sample = torch.mean(
-            complex_loss_map,
-            dim=(1, 2)
+        num = torch.real(enhanced_complex * torch.conj(clean_complex))
+        den = torch.abs(enhanced_complex) * torch.abs(clean_complex) + eps
+        phase_loss_map = 1 - (num / den)
+        mag_gt = torch.abs(clean_complex)
+        phase_mask = (mag_gt > mag_gt.mean(dim=(1,2), keepdim=True)).float()
+        phase_loss_per_sample = (
+            (phase_loss_map  * phase_mask).sum(dim=(1,2)) /
+            (phase_mask.sum(dim=(1,2)) + 1e-8)
             )
-        complex_loss = torch.mean(complex_loss_map)
+        phase_loss = phase_loss_per_sample.mean()
 
-        loss = lambda1 * sisdr_loss + lambda2 * spec_loss + lambda3 * complex_loss 
+        loss = lambda1 * sisdr_loss + lambda2 * spec_loss + lambda3 * phase_loss
 
         print(f"\nbatch loss: {loss.item():.4f}")
 
@@ -239,7 +243,7 @@ def evaluate_and_play(model, test_loader, device, num_examples=4,
 
             print(f"  SI-SDR loss: {sisdr_loss_per_sample[i].item():.4f}")
             print(f"  Spec loss:   {spec_loss_per_sample[i].item():.4f}")
-            print(f"  Comp loss:   {complex_loss_per_sample[i].item():.4f}")
+            print(f"  Phase loss:  {phase_loss_per_sample[i].item():.4f}")
             print(f"  SNR noisy:   {snr_noisy_batch[i].item():.2f} dB")
             print(f"  SNR enhced:  {snr_enh_batch[i].item():.2f} dB")
             print(f"  ΔSNR:        {snr_improve_batch[i].item():.2f} dB")
@@ -345,7 +349,7 @@ def main():
 
     df, summary = evaluate_full(model, test_loader, device, DatasetConfig.sample_rate, EPS)
 
-    # save_to_csv(df, "results/eval_full_com.csv")
+    save_to_csv(df, "results/eval_full_com.csv")
 
 
 if __name__ == "__main__":

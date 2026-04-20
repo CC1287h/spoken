@@ -156,7 +156,7 @@ def save_to_csv(df, path):
 # evaluation + playback
 @torch.no_grad()
 def evaluate_and_play(model, test_loader, device, num_examples=4,
-                      lambda1=1.0, lambda2=0.1, lambda3=1.0, eps=1e-12):
+                      lambda1=1.0, lambda2=0.005, lambda3=0.0, eps=1e-12):
     model.eval()
 
     examples = 0
@@ -219,7 +219,7 @@ def evaluate_and_play(model, test_loader, device, num_examples=4,
             )
         complex_loss = torch.mean(complex_loss_map)
 
-        loss = lambda1 * sisdr_loss + lambda2 * spec_loss + lambda3 * complex_loss 
+        loss = lambda1 * sisdr_loss + lambda2 * spec_loss + lambda3 * complex_loss
 
         print(f"\nbatch loss: {loss.item():.4f}")
 
@@ -376,7 +376,7 @@ def main():
 
     df, summary = evaluate_full(model, test_loader, device, DatasetConfig.sample_rate, EPS)
 
-    # save_to_csv(df, "results/eval_full_mag.csv")
+    save_to_csv(df, "results/eval_full_mag.csv")
 
 
 if __name__ == "__main__":
