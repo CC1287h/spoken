@@ -93,14 +93,14 @@ def train_epoch(model, train_loader, optimizer, device,
         enhanced_complex = pred_mask * noisy_complex
 
         # waveform
-        enhanced_wave = istft_reconstruct(enhanced_complex)
         clean_wave = istft_reconstruct(clean_complex)
+        enhanced_wave = istft_reconstruct(enhanced_complex)
 
-        enhanced_mag = torch.abs(enhanced_complex)
         clean_mag = torch.abs(clean_complex)
+        enhanced_mag = torch.abs(enhanced_complex)
 
-        enhanced_log = torch.log(enhanced_mag + eps)
         clean_log = torch.log(clean_mag + eps)
+        enhanced_log = torch.log(enhanced_mag + eps)
 
         sisdr_loss  = si_sdr_loss(enhanced_wave, clean_wave, eps)
 
@@ -141,22 +141,24 @@ def evaluate(model, test_loader, device,
         clean = clean.to(device)
         mask = mask.to(device)
 
+        # forward
         pred_mask = model(noisy)
         pred_mask = pred_mask.squeeze(1)
 
+        # complex
         noisy_complex = torch.complex(noisy[:, 0], noisy[:, 1]).to(device)
         clean_complex = torch.complex(clean[:, 0], clean[:, 1]).to(device)
-
         enhanced_complex = pred_mask * noisy_complex
 
-        enhanced_wave = istft_reconstruct(enhanced_complex)
+        # waveform
         clean_wave = istft_reconstruct(clean_complex)
+        enhanced_wave = istft_reconstruct(enhanced_complex)
 
-        enhanced_mag = torch.abs(enhanced_complex)
         clean_mag = torch.abs(clean_complex)
+        enhanced_mag = torch.abs(enhanced_complex)
 
-        enhanced_log = torch.log(enhanced_mag + eps)
         clean_log = torch.log(clean_mag + eps)
+        enhanced_log = torch.log(enhanced_mag + eps)
 
         sisdr_loss  = si_sdr_loss(enhanced_wave, clean_wave, eps)
 

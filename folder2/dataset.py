@@ -106,9 +106,9 @@ class SpeechDataset(torch.utils.data.Dataset):
         noisy = self.load_wav(os.path.join(self.noisy_dir, filename))
         clean = self.load_wav(os.path.join(self.clean_dir, filename))
 
-        T = min(clean.shape[0], noisy.shape[0])
-        noisy = noisy[:T]
-        clean = clean[:T]
+        wave_lengths = min(clean.shape[0], noisy.shape[0])
+        noisy = noisy[:wave_lengths]
+        clean = clean[:wave_lengths]
 
         noisy = noisy.unsqueeze(0)
         clean = clean.unsqueeze(0)
@@ -134,13 +134,15 @@ class SpeechDataset(torch.utils.data.Dataset):
             "noisy_imag": noisy_imag,
             "clean_real": clean_real,
             "clean_imag": clean_imag,
-            "length": noisy_spec.shape[-1]
+            "spec_length": noisy_spec.shape[-1],
+            "wave_length": wave_lengths
             }
 
 
 def collate_fn(batch):
-    lengths = [x["length"] for x in batch]
-    max_len = max(lengths)
+    spec_lengths = [x["spec_length"] for x in batch]
+    wave_lengths = [x["wave_length"] for x in batch]
+    max_len = max(spec_lengths)
 
     def pad(x):
         return F.pad(x, (0, max_len - x.shape[-1]))
@@ -154,10 +156,10 @@ def collate_fn(batch):
     clean = torch.stack([clean_real, clean_imag], dim=1)
 
     mask = torch.zeros(len(batch), 1, 1, max_len)
-    for i, l in enumerate(lengths):
+    for i, l in enumerate(spec_lengths):
         mask[i, :, :, :l] = 1.0
 
-    return noisy, clean, mask, lengths
+    return noisy, clean, mask, wave_lengths
 
 
 class BucketBatchSampler(Sampler):

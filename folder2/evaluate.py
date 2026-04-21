@@ -161,7 +161,7 @@ def evaluate_and_play(model, test_loader, device, num_examples=4,
 
     examples = 0
 
-    for noisy, clean, mask, _ in test_loader:
+    for noisy, clean, mask, lengths in test_loader:
         noisy = noisy.to(device)
         clean = clean.to(device)
         mask = mask.to(device)
@@ -177,14 +177,14 @@ def evaluate_and_play(model, test_loader, device, num_examples=4,
 
         # waveform
         noisy_wave = istft_reconstruct(noisy_complex)
-        enhanced_wave = istft_reconstruct(enhanced_complex)
         clean_wave = istft_reconstruct(clean_complex)
+        enhanced_wave = istft_reconstruct(enhanced_complex)
 
-        enhanced_mag = torch.abs(enhanced_complex)
         clean_mag = torch.abs(clean_complex)
+        enhanced_mag = torch.abs(enhanced_complex)
 
-        enhanced_log = torch.log(enhanced_mag + eps)
         clean_log = torch.log(clean_mag + eps)
+        enhanced_log = torch.log(enhanced_mag + eps)
 
         sisdr_loss_per_sample  = si_sdr_loss(enhanced_wave, clean_wave, eps, reduction="none")
         sisdr_loss = sisdr_loss_per_sample.mean()
@@ -210,18 +210,27 @@ def evaluate_and_play(model, test_loader, device, num_examples=4,
 
         loss = lambda1 * sisdr_loss + lambda2 * spec_loss + lambda3 * phase_loss
 
-        print(f"\nbatch loss: {loss.item():.4f}")
-
         snr_noisy_batch = compute_snr_batch(clean_wave, noisy_wave, eps)
         snr_enh_batch = compute_snr_batch(clean_wave, enhanced_wave, eps)
         snr_improve_batch = snr_enh_batch - snr_noisy_batch
 
+        print(f"\nbatch loss: {loss.item():.4f}")
+
         print(f"Avg ΔSNR:   {snr_improve_batch.mean():.4f}")
 
-        for i in range(noisy.shape[0]):
-            noisy_wave_i = noisy_wave[i].cpu().numpy()
-            clean_wave_i = clean_wave[i].cpu().numpy()
-            enhanced_wave_i = enhanced_wave[i].cpu().numpy()
+        B = noisy_wave.shape[0]
+
+        for i in range(B):
+            L = min(
+                int(lengths[i]),
+                clean_wave.shape[1],
+                enhanced_wave.shape[1],
+                noisy_wave.shape[1]
+                )
+
+            noisy_wave_i = noisy_wave[i][:L].cpu().numpy()
+            clean_wave_i = clean_wave[i][:L].cpu().numpy()
+            enhanced_wave_i = enhanced_wave[i][:L].cpu().numpy()
 
             noisy_wave_i = normalize(noisy_wave_i)
             clean_wave_i = normalize(clean_wave_i)
@@ -259,7 +268,7 @@ def evaluate_full(model, test_loader, device, sample_rate, eps=1e-12):
 
     results = []
 
-    for noisy, clean, _, _ in tqdm(test_loader, desc="Full Eval"):
+    for noisy, clean, _, lengths in tqdm(test_loader, desc="Full Eval"):
         noisy = noisy.to(device)
         clean = clean.to(device)
 
@@ -274,19 +283,26 @@ def evaluate_full(model, test_loader, device, sample_rate, eps=1e-12):
 
         # waveform
         noisy_wave = istft_reconstruct(noisy_complex)
-        enhanced_wave = istft_reconstruct(enhanced_complex)
         clean_wave = istft_reconstruct(clean_complex)
+        enhanced_wave = istft_reconstruct(enhanced_complex)
 
         B = noisy_wave.shape[0]
 
         for i in range(B):
-            clean_wave_i = clean_wave[i].cpu().numpy()
-            noisy_wave_i = noisy_wave[i].cpu().numpy()
-            enhanced_wave_i = enhanced_wave[i].cpu().numpy()
+            L = min(
+                int(lengths[i]),
+                clean_wave.shape[1],
+                enhanced_wave.shape[1],
+                noisy_wave.shape[1]
+                )
+
+            noisy_wave_i = noisy_wave[i][:L].cpu().numpy()
+            clean_wave_i = clean_wave[i][:L].cpu().numpy()
+            enhanced_wave_i = enhanced_wave[i][:L].cpu().numpy()
 
             # normalize
-            clean_wave_i = normalize(clean_wave_i, eps)
             noisy_wave_i = normalize(noisy_wave_i, eps)
+            clean_wave_i = normalize(clean_wave_i, eps)
             enhanced_wave_i = normalize(enhanced_wave_i, eps)
 
             # metrics

@@ -88,29 +88,29 @@ def train_epoch(model, train_loader, optimizer, device,
         pred_mask = model(noisy)
         enhanced = pred_mask * noisy
 
-        enhanced = enhanced.squeeze(1)
         clean = clean.squeeze(1)
+        enhanced = enhanced.squeeze(1)
         phase = phase.squeeze(1)
 
         # complex
-        enhanced_complex = torch.complex(
-            enhanced * torch.cos(phase),
-            enhanced * torch.sin(phase)
-        )
         clean_complex = torch.complex(
             clean * torch.cos(phase),
             clean * torch.sin(phase)
         )
+        enhanced_complex = torch.complex(
+            enhanced * torch.cos(phase),
+            enhanced * torch.sin(phase)
+        )
 
         # waveform
-        enhanced_wave = istft_reconstruct(enhanced_complex)
         clean_wave = istft_reconstruct(clean_complex)
+        enhanced_wave = istft_reconstruct(enhanced_complex)
 
-        enhanced_mag = torch.abs(enhanced_complex)
         clean_mag = torch.abs(clean_complex)
+        enhanced_mag = torch.abs(enhanced_complex)
 
-        enhanced_log = torch.log(enhanced_mag + eps)
         clean_log = torch.log(clean_mag + eps)
+        enhanced_log = torch.log(enhanced_mag + eps)
 
         sisdr_loss  = si_sdr_loss(enhanced_wave, clean_wave, eps)
 
@@ -149,29 +149,29 @@ def evaluate(model, test_loader, device,
         pred_mask = model(noisy)
         enhanced = pred_mask * noisy
 
-        enhanced = enhanced.squeeze(1)
         clean = clean.squeeze(1)
+        enhanced = enhanced.squeeze(1)
         phase = phase.squeeze(1)
 
         # complex
-        enhanced_complex = torch.complex(
-            enhanced.squeeze(1) * torch.cos(phase),
-            enhanced.squeeze(1) * torch.sin(phase)
-        )
         clean_complex = torch.complex(
             clean.squeeze(1) * torch.cos(phase),
             clean.squeeze(1) * torch.sin(phase)
         )
+        enhanced_complex = torch.complex(
+            enhanced.squeeze(1) * torch.cos(phase),
+            enhanced.squeeze(1) * torch.sin(phase)
+        )
 
         # waveform
-        enhanced_wave = istft_reconstruct(enhanced_complex)
         clean_wave = istft_reconstruct(clean_complex)
+        enhanced_wave = istft_reconstruct(enhanced_complex)
 
-        enhanced_mag = torch.abs(enhanced_complex)
         clean_mag = torch.abs(clean_complex)
+        enhanced_mag = torch.abs(enhanced_complex)
 
-        enhanced_log = torch.log(enhanced_mag + eps)
         clean_log = torch.log(clean_mag + eps)
+        enhanced_log = torch.log(enhanced_mag + eps)
 
         sisdr_loss  = si_sdr_loss(enhanced_wave, clean_wave, eps)
 
