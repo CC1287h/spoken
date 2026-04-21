@@ -47,7 +47,6 @@ class UNet(nn.Module):
         self.dec1 = DoubleConv(64, 32)
 
         # head
-        self.mag_head = nn.Conv2d(32, 1, 1)
         self.real_head = nn.Conv2d(32, 1, 1)
         self.imag_head = nn.Conv2d(32, 1, 1)
 
@@ -79,17 +78,14 @@ class UNet(nn.Module):
         d1 = self.dec1(d1)
 
         # ===== head =====
-        mag = self.mag_head(d1)
         real = self.real_head(d1)
         imag = self.imag_head(d1)
 
         # ===== resize =====
-        mag = F.interpolate(mag, size=self.input_shape[2:], mode="bilinear", align_corners=False)
         real = F.interpolate(real, size=self.input_shape[2:], mode="bilinear", align_corners=False)
         imag = F.interpolate(imag, size=self.input_shape[2:], mode="bilinear", align_corners=False)
 
         # ===== activation =====
-        mag = torch.sigmoid(mag)
         real = torch.tanh(real)
         imag = torch.tanh(imag)
 
