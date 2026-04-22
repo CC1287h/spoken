@@ -1,5 +1,8 @@
+import gc
 import numpy as np
+import os
 import sounddevice as sd
+import soundfile as sf
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -365,8 +368,68 @@ def evaluate_full(model, test_loader, device, sample_rate, eps=1e-12):
     return df, summary
 
 
+@torch.no_grad()
+def enhance_and_save(
+    model,
+    device,
+    test_files,
+    infer_loader,
+    suffix
+):
+    model.eval()
+
+    save_dir = os.path.join("results", suffix)
+    os.makedirs(save_dir, exist_ok=True)
+
+    global_idx = 0
+
+    for noisy, _, phase, _, lengths in infer_loader:
+
+        noisy = noisy.to(device)
+        phase = phase.to(device)
+
+        # forward
+        pred_mask = model(noisy)
+        enhanced = pred_mask * noisy
+
+        noisy = noisy.squeeze(1)
+        enhanced = enhanced.squeeze(1)
+        phase = phase.squeeze(1)
+
+        # complex
+        enhanced_complex = torch.complex(
+            enhanced * torch.cos(phase),
+            enhanced * torch.sin(phase)
+        )
+
+        # wave
+        enhanced_wave = istft_reconstruct(enhanced_complex)
+
+        B = enhanced_wave.shape[0]
+
+        for i in range(B):
+            L = min(int(lengths[i]), enhanced_wave.shape[1])
+            wav = enhanced_wave[i][:L].cpu().numpy()
+
+            wav = normalize(wav)
+
+            if global_idx < len(test_files):
+                orig_name = Path(test_files[global_idx]).stem
+            else:
+                orig_name = f"sample_{global_idx}"
+
+            out_name = f"{orig_name}_{suffix}.wav"
+            out_path = os.path.join(save_dir, out_name)
+
+            sf.write(out_path, wav, DatasetConfig.sample_rate)
+
+            global_idx += 1
+
+    print(f"Saved enhanced files to: {save_dir}")
+
+
 # main
-def main():
+def main(configs=None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     subset = load_subset(
@@ -381,16 +444,103 @@ def main():
         num_workers=NUM_WORKERS
     )
 
-    model = UNet().to(device)
-    model.load_state_dict(torch.load("ckpt/best_model_mag.pth", map_location=device))
+    if configs is None:
+        model = UNet().to(device)
+        model.load_state_dict(torch.load("ckpt/best_model_baseline.pth", map_location=device))
 
-    print("Loaded best model")
+        print("Loaded best model")
 
-    # evaluate_and_play(model, test_loader, device, eps=EPS)
+        # evaluate_and_play(model, test_loader, device, eps=EPS)
 
-    df, summary = evaluate_full(model, test_loader, device, DatasetConfig.sample_rate, EPS)
+        df, summary = evaluate_full(model, test_loader, device, DatasetConfig.sample_rate, EPS)
 
-    save_to_csv(df, "results/eval_full_mag.csv")
+        save_to_csv(df, "results/eval_full_baseline.csv")
+    else:
+        all_results = {}
+
+        for config in configs:
+            print(f"\n====== Evaluating: {config['name']} ======")
+
+            model = UNet(
+                use_ca=config["use_ca"],
+                use_skip_attn=config["use_skip_attn"]
+            ).to(device)
+
+            ckpt_path = f"ckpt/best_model_{config['name']}.pth"
+
+            model.load_state_dict(torch.load(ckpt_path, map_location=device))
+            print(f"Loaded {ckpt_path}")
+
+            df, summary = evaluate_full(
+                model,
+                test_loader,
+                device,
+                DatasetConfig.sample_rate,
+                EPS
+            )
+
+            save_path = f"results/eval_full_{config['name']}.csv"
+            save_to_csv(df, save_path)
+
+            all_results[config["name"]] = summary
+
+            del model
+            released = gc.collect()
+            torch.cuda.empty_cache()
+
+            print(f"\nCollected {released} objects.")
+        
+        summary_df = pd.DataFrame(all_results).T
+        save_to_csv(summary_df, "results/summary_compare.csv")
+
+    # infer_files = ['p232_006', 'p232_290', 'p257_098']
+
+    # # dataloader
+    # _, infer_loader = get_dataloaders(
+    #     test_files=infer_files,
+    #     batch_size=BATCH_SIZE,
+    #     num_workers=NUM_WORKERS
+    # )
+
+    # print("\n===== GENERATING ENHANCED AUDIO =====")
+
+    # if configs is None:
+    #     model = UNet().to(device)
+    #     model.load_state_dict(torch.load("ckpt/best_model_baseline.pth", map_location=device))
+
+    #     enhance_and_save(
+    #         model,
+    #         device,
+    #         infer_files,
+    #         infer_loader,
+    #         suffix="baseline"
+    #     )
+
+    # else:
+    #     for config in configs:
+    #         print(f"\n------ Enhancing: {config['name']} ------")
+
+    #         model = UNet(
+    #             use_ca=config["use_ca"],
+    #             use_skip_attn=config["use_skip_attn"]
+    #         ).to(device)
+
+    #         ckpt_path = f"ckpt/best_model_{config['name']}.pth"
+    #         model.load_state_dict(torch.load(ckpt_path, map_location=device))
+
+    #         enhance_and_save(
+    #             model,
+    #             device,
+    #             infer_files,
+    #             infer_loader,
+    #             suffix=config["name"]
+    #         )
+
+    #         del model
+    #         released = gc.collect()
+    #         torch.cuda.empty_cache()
+
+    #         print(f"Collected {released} objects.")
 
 
 if __name__ == "__main__":
@@ -398,4 +548,11 @@ if __name__ == "__main__":
     NUM_WORKERS = 4
     EPS = 1e-12
 
-    main()
+    configs = [
+        {"name": "baseline", "use_ca": False, "use_skip_attn": False},
+        {"name": "ca",       "use_ca": True,  "use_skip_attn": False},
+        {"name": "skip",     "use_ca": False, "use_skip_attn": True},
+        {"name": "ca_skip",  "use_ca": True,  "use_skip_attn": True},
+    ]
+
+    main(configs)

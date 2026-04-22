@@ -1,5 +1,8 @@
+import gc
 import numpy as np
+import os
 import sounddevice as sd
+import soundfile as sf
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -340,6 +343,58 @@ def evaluate_full(model, test_loader, device, sample_rate, eps=1e-12):
     return df, summary
 
 
+@torch.no_grad()
+def enhance_and_save(
+    model,
+    device,
+    test_files,
+    infer_loader,
+    suffix
+):
+    model.eval()
+
+    save_dir = os.path.join("results", suffix)
+    os.makedirs(save_dir, exist_ok=True)
+
+    global_idx = 0
+
+    for noisy, _, _, lengths in infer_loader:
+        noisy = noisy.to(device)
+
+        # forward
+        pred_mask = model(noisy)
+        pred_mask = pred_mask.squeeze(1)
+
+        # complex
+        noisy_complex = torch.complex(noisy[:, 0], noisy[:, 1])
+        enhanced_complex = pred_mask * noisy_complex
+
+        # waveform
+        enhanced_wave = istft_reconstruct(enhanced_complex)
+
+        B = enhanced_wave.shape[0]
+
+        for i in range(B):
+            L = min(int(lengths[i]), enhanced_wave.shape[1])
+            wav = enhanced_wave[i][:L].cpu().numpy()
+
+            wav = normalize(wav)
+
+            if global_idx < len(test_files):
+                orig_name = Path(test_files[global_idx]).stem
+            else:
+                orig_name = f"sample_{global_idx}"
+
+            out_name = f"{orig_name}_{suffix}.wav"
+            out_path = os.path.join(save_dir, out_name)
+
+            sf.write(out_path, wav, DatasetConfig.sample_rate)
+
+            global_idx += 1
+
+    print(f"Saved enhanced files to: {save_dir}")
+
+
 # main
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -357,7 +412,7 @@ def main():
     )
 
     model = UNet().to(device)
-    model.load_state_dict(torch.load("ckpt/best_model_com.pth", map_location=device))
+    model.load_state_dict(torch.load("ckpt/best_model_complex.pth", map_location=device))
 
     print("Loaded best model")
 
@@ -365,7 +420,29 @@ def main():
 
     df, summary = evaluate_full(model, test_loader, device, DatasetConfig.sample_rate, EPS)
 
-    save_to_csv(df, "results/eval_full_com.csv")
+    save_to_csv(df, "results/eval_full_complex.csv")
+
+    # infer_files = ['p232_006', 'p232_290', 'p257_098']
+
+    # # dataloader
+    # _, infer_loader = get_dataloaders(
+    #     test_files=infer_files,
+    #     batch_size=BATCH_SIZE,
+    #     num_workers=NUM_WORKERS
+    # )
+
+    # print("\n===== GENERATING ENHANCED AUDIO =====")
+
+    # model = UNet().to(device)
+    # model.load_state_dict(torch.load("ckpt/best_model_complex.pth", map_location=device))
+
+    # enhance_and_save(
+    #     model,
+    #     device,
+    #     infer_files,
+    #     infer_loader,
+    #     suffix="complex"
+    # )
 
 
 if __name__ == "__main__":

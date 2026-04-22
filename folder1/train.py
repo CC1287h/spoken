@@ -1,3 +1,4 @@
+import gc
 import numpy as np
 import os
 import random
@@ -189,7 +190,7 @@ def evaluate(model, test_loader, device,
 
 
 # ===== train =====
-def train(model, train_loader, test_loader, optimizer, device, eps=1-12):
+def train(model, train_loader, test_loader, optimizer, device, eps=1e-12, save_path='ckpt/default.pth'):
     best_loss = float("inf")
 
     for epoch in range(EPOCHS):
@@ -206,11 +207,13 @@ def train(model, train_loader, test_loader, optimizer, device, eps=1-12):
             best_loss = val_loss
             os.makedirs("ckpt", exist_ok=True)
 
-            torch.save(model.state_dict(), "ckpt/best_model_mag.pth")
-            print("Saved best model")
+            torch.save(model.state_dict(), save_path)
+            print(f"Saved best model to {save_path}")
+        
+    return best_loss
 
 
-def main():
+def main(configs=None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train_loader, test_loader = get_dataloaders(
@@ -218,11 +221,49 @@ def main():
         num_workers=NUM_WORKERS
     )
 
-    model = UNet().to(device)
+    if configs is None:
+        model = UNet().to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=LR)
+        optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 
-    train(model, train_loader, test_loader, optimizer, device, EPS)
+        train(model, train_loader, test_loader, optimizer, device, EPS, "ckpt/best_model_baseline.pth")
+    else:
+        results = {}
+
+        for config in configs:
+            print(f"\n====== Running: {config['name']} ======")
+
+            model = UNet(
+                use_ca=config["use_ca"],
+                use_skip_attn=config["use_skip_attn"]
+            ).to(device)
+
+            optimizer = torch.optim.Adam(model.parameters(), lr=LR)
+
+            save_path = f"ckpt/best_model_{config['name']}.pth"
+
+            best_loss = train(
+                model,
+                train_loader,
+                test_loader,
+                optimizer,
+                device,
+                eps=EPS,
+                save_path=save_path
+            )
+
+            results[config["name"]] = best_loss
+
+            del model
+            del optimizer
+            released = gc.collect()
+            torch.cuda.empty_cache()
+
+            print(f"\nCollected {released} objects.")
+        
+        print("\n===== FINAL RESULTS =====")
+        for k, v in results.items():
+            print(f"loss_{k}: {v:.4f}")
 
 
 if __name__ == "__main__":
@@ -232,6 +273,13 @@ if __name__ == "__main__":
     EPOCHS = 10
     EPS = 1e-12
 
+    configs = [
+        {"name": "baseline", "use_ca": False, "use_skip_attn": False},
+        # {"name": "ca",       "use_ca": True,  "use_skip_attn": False},
+        # {"name": "skip",     "use_ca": False, "use_skip_attn": True},
+        # {"name": "ca_skip",  "use_ca": True,  "use_skip_attn": True},
+    ]
+
     set_seed(42)
 
-    main()
+    main(configs)

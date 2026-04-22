@@ -200,7 +200,7 @@ def train(model, train_loader, test_loader, optimizer, device, eps=1e-12):
             best_loss = val_loss
             os.makedirs("ckpt", exist_ok=True)
 
-            torch.save(model.state_dict(), "ckpt/best_model_com.pth")
+            torch.save(model.state_dict(), "ckpt/best_model_complex.pth")
             print("Saved best model")
 
 
