@@ -1,8 +1,10 @@
 import gc
+import matplotlib.pyplot as plt
 import numpy as np
 import os
 import sounddevice as sd
 import soundfile as sf
+from scipy import signal
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -29,7 +31,7 @@ def istft_reconstruct(complex_spec):
     else:
         raise ValueError(f"Unknown window type: {DatasetConfig.window}")
 
-    wav = torch.istft(
+    wave = torch.istft(
         complex_spec,
         n_fft=DatasetConfig.n_fft,
         hop_length=DatasetConfig.hop_length,
@@ -37,7 +39,7 @@ def istft_reconstruct(complex_spec):
         window=window,
         length=None
     )
-    return wav
+    return wave
 
 
 def si_sdr_loss(pred, target, eps=1e-12, reduction="mean"):
@@ -154,6 +156,50 @@ def save_to_csv(df, path):
         fallback = path.with_name(f"{path.stem}_{ts}.csv")
         df.to_csv(fallback, index=False)
         return fallback
+
+
+def plot_waveform(clean, noisy, enhanced, sample_rate, output_path, title):
+    signals = [("Clean", clean), ("Noisy", noisy), ("Enhanced", enhanced)]
+
+    fig, axes = plt.subplots(3, 1, figsize=(12, 8), sharex=True)
+    fig.suptitle(title, y=0.98)
+
+    for index, (axis, (label, samples)) in enumerate(zip(axes, signals)):
+        times = np.arange(len(samples)) / sample_rate
+        axis.plot(times, samples, linewidth=0.7)
+        axis.set_ylabel(label)
+        axis.grid(alpha=0.25)
+        if index < len(signals) - 1:
+            axis.tick_params(labelbottom=False)
+            axis.set_xlabel("")
+
+    axes[-1].set_xlabel("Time (s)")
+    fig.subplots_adjust(top=0.90, bottom=0.10, hspace=0.24)
+    fig.savefig(output_path, dpi=160)
+    plt.close(fig)
+
+
+def plot_spectrogram(clean, noisy, enhanced, sample_rate, output_path, title, n_fft = 1024, hop_length = 256):
+    signals = [("Clean", clean), ("Noisy", noisy), ("Enhanced", enhanced)]
+
+    fig, axes = plt.subplots(3, 1, figsize=(12, 9.5), sharex=True, sharey=True)
+    fig.suptitle(title, y=0.98)
+
+    for index, (axis, (label, samples)) in enumerate(zip(axes, signals)):
+        spectrum = librosa.stft(samples, n_fft=n_fft, hop_length=hop_length)
+        db = librosa.amplitude_to_db(np.abs(spectrum), ref=np.max)
+        image = librosa.display.specshow(db, sr=sample_rate, hop_length=hop_length, x_axis="time", y_axis="hz", ax=axis)
+        axis.set_title(label)
+        if index < len(signals) - 1:
+            axis.tick_params(labelbottom=False)
+            axis.set_xlabel("")
+        else:
+            axis.set_xlabel("Time (s)")
+
+    fig.subplots_adjust(top=0.89, bottom=0.08, right=0.88, hspace=0.20)
+    fig.colorbar(image, ax=axes, format="%+2.0f dB", fraction=0.035, pad=0.06)
+    fig.savefig(output_path, dpi=160, bbox_inches="tight")
+    plt.close(fig)
 
 
 # evaluation + playback
@@ -409,9 +455,9 @@ def enhance_and_save(
 
         for i in range(B):
             L = min(int(lengths[i]), enhanced_wave.shape[1])
-            wav = enhanced_wave[i][:L].cpu().numpy()
+            enhanced_wave_i = enhanced_wave[i][:L].cpu().numpy()
 
-            wav = normalize(wav)
+            enhanced_wave_i = normalize(enhanced_wave_i)
 
             if global_idx < len(test_files):
                 orig_name = Path(test_files[global_idx]).stem
@@ -421,11 +467,106 @@ def enhance_and_save(
             out_name = f"{orig_name}_{suffix}.wav"
             out_path = os.path.join(save_dir, out_name)
 
-            sf.write(out_path, wav, DatasetConfig.sample_rate)
+            sf.write(out_path, enhanced_wave_i, DatasetConfig.sample_rate)
 
             global_idx += 1
 
     print(f"Saved enhanced files to: {save_dir}")
+
+
+@torch.no_grad()
+def enhance_and_plot(
+    model,
+    device,
+    test_files,
+    infer_loader,
+    suffix
+):
+    model.eval()
+
+    fig_wave_dir = os.path.join("figures", "waveform_comparison", suffix)
+    fig_spec_dir = os.path.join("figures", "spectrogram_comparison", suffix)
+
+    os.makedirs(fig_wave_dir, exist_ok=True)
+    os.makedirs(fig_spec_dir, exist_ok=True)
+
+    global_idx = 0
+
+    for noisy, clean, phase, _, lengths in infer_loader:
+        noisy = noisy.to(device)
+        clean = clean.to(device)
+        phase = phase.to(device)
+
+        # forward
+        pred_mask = model(noisy)
+        enhanced = pred_mask * noisy
+
+        noisy = noisy.squeeze(1)
+        clean = clean.squeeze(1)
+        enhanced = enhanced.squeeze(1)
+        phase = phase.squeeze(1)
+
+        # complex
+        noisy_complex = torch.complex(
+            noisy * torch.cos(phase),
+            noisy * torch.sin(phase)
+        )
+        clean_complex = torch.complex(
+            clean * torch.cos(phase),
+            clean * torch.sin(phase)
+        )
+        enhanced_complex = torch.complex(
+            enhanced * torch.cos(phase),
+            enhanced * torch.sin(phase)
+        )
+
+        # wave
+        noisy_wave = istft_reconstruct(noisy_complex)
+        clean_wave = istft_reconstruct(clean_complex)
+        enhanced_wave = istft_reconstruct(enhanced_complex)
+
+        B = enhanced_wave.shape[0]
+
+        for i in range(B):
+            L = min(
+                int(lengths[i]),
+                noisy_wave.shape[1],
+                clean_wave.shape[1],
+                enhanced_wave.shape[1]
+            )
+
+            noisy_wave_i = normalize(noisy_wave[i][:L].cpu().numpy())
+            clean_wave_i = normalize(clean_wave[i][:L].cpu().numpy())
+            enhanced_wave_i = normalize(enhanced_wave[i][:L].cpu().numpy())
+
+            if global_idx < len(test_files):
+                orig_name = Path(test_files[global_idx]).stem
+            else:
+                orig_name = f"sample_{global_idx}"
+
+            # plot waveform
+            plot_waveform(
+                clean_wave_i,
+                noisy_wave_i,
+                enhanced_wave_i,
+                DatasetConfig.sample_rate,
+                os.path.join(fig_wave_dir, f"{orig_name}.png"),
+                title=f"{suffix}: {orig_name}.wav"
+            )
+
+            # plot spectrogram
+            plot_spectrogram(
+                clean_wave_i,
+                noisy_wave_i,
+                enhanced_wave_i,
+                DatasetConfig.sample_rate,
+                os.path.join(fig_spec_dir, f"{orig_name}.png"),
+                title=f"{suffix}: {orig_name}.wav"
+            )
+
+            global_idx += 1
+
+    print(f"Saved figures to: figures/")
 
 
 # main
@@ -438,69 +579,69 @@ def main(configs=None):
         snr=12.5
     )
 
-    _, test_loader = get_dataloaders(
-        # test_files=subset,
-        batch_size=BATCH_SIZE,
-        num_workers=NUM_WORKERS
-    )
-
-    if configs is None:
-        model = UNet().to(device)
-        model.load_state_dict(torch.load("ckpt/best_model_baseline.pth", map_location=device))
-
-        print("Loaded best model")
-
-        # evaluate_and_play(model, test_loader, device, eps=EPS)
-
-        df, summary = evaluate_full(model, test_loader, device, DatasetConfig.sample_rate, EPS)
-
-        save_to_csv(df, "results/eval_full_baseline.csv")
-    else:
-        all_results = {}
-
-        for config in configs:
-            print(f"\n====== Evaluating: {config['name']} ======")
-
-            model = UNet(
-                use_ca=config["use_ca"],
-                use_skip_attn=config["use_skip_attn"]
-            ).to(device)
-
-            ckpt_path = f"ckpt/best_model_{config['name']}.pth"
-
-            model.load_state_dict(torch.load(ckpt_path, map_location=device))
-            print(f"Loaded {ckpt_path}")
-
-            df, summary = evaluate_full(
-                model,
-                test_loader,
-                device,
-                DatasetConfig.sample_rate,
-                EPS
-            )
-
-            save_path = f"results/eval_full_{config['name']}.csv"
-            save_to_csv(df, save_path)
-
-            all_results[config["name"]] = summary
-
-            del model
-            released = gc.collect()
-            torch.cuda.empty_cache()
-
-            print(f"\nCollected {released} objects.")
-        
-        summary_df = pd.DataFrame(all_results).T
-        save_to_csv(summary_df, "results/summary_compare.csv")
-
-    # infer_files = ['p232_006', 'p232_290', 'p257_098']
-
-    # # dataloader
-    # _, infer_loader = get_dataloaders(
-    #     test_files=infer_files,
+    # _, test_loader = get_dataloaders(
+    #     # test_files=subset,
     #     batch_size=BATCH_SIZE,
     #     num_workers=NUM_WORKERS
     # )
+
+    # if configs is None:
+    #     model = UNet().to(device)
+    #     model.load_state_dict(torch.load("ckpt/best_model_baseline.pth", map_location=device))
+
+    #     print("Loaded best model")
+
+    #     # evaluate_and_play(model, test_loader, device, eps=EPS)
+
+    #     df, summary = evaluate_full(model, test_loader, device, DatasetConfig.sample_rate, EPS)
+
+    #     save_to_csv(df, "results/eval_full_baseline.csv")
+    # else:
+    #     all_results = {}
+
+    #     for config in configs:
+    #         print(f"\n====== Evaluating: {config['name']} ======")
+
+    #         model = UNet(
+    #             use_ca=config["use_ca"],
+    #             use_sa=config["use_sa"]
+    #         ).to(device)
+
+    #         ckpt_path = f"ckpt/best_model_{config['name']}.pth"
+
+    #         model.load_state_dict(torch.load(ckpt_path, map_location=device))
+    #         print(f"Loaded {ckpt_path}")
+
+    #         df, summary = evaluate_full(
+    #             model,
+    #             test_loader,
+    #             device,
+    #             DatasetConfig.sample_rate,
+    #             EPS
+    #         )
+
+    #         save_path = f"results/eval_full_{config['name']}.csv"
+    #         save_to_csv(df, save_path)
+
+    #         all_results[config["name"]] = summary
+
+    #         del model
+    #         released = gc.collect()
+    #         torch.cuda.empty_cache()
+
+    #         print(f"\nCollected {released} objects.")
+        
+    #     summary_df = pd.DataFrame(all_results).T
+    #     save_to_csv(summary_df, "results/summary_compare.csv")
+
+    infer_files = ['p232_006', 'p232_290', 'p257_098']
+
+    # infer_loader
+    _, infer_loader = get_dataloaders(
+        test_files=infer_files,
+        batch_size=BATCH_SIZE,
+        num_workers=NUM_WORKERS
+    )
 
     # print("\n===== GENERATING ENHANCED AUDIO =====")
 
@@ -522,7 +663,7 @@ def main(configs=None):
 
     #         model = UNet(
     #             use_ca=config["use_ca"],
-    #             use_skip_attn=config["use_skip_attn"]
+    #             use_sa=config["use_sa"]
     #         ).to(device)
 
     #         ckpt_path = f"ckpt/best_model_{config['name']}.pth"
@@ -542,6 +683,46 @@ def main(configs=None):
 
     #         print(f"Collected {released} objects.")
 
+    print("\n===== GENERATING COMPARE PLOT =====")
+
+    if configs is None:
+        model = UNet().to(device)
+        model.load_state_dict(torch.load("ckpt/best_model_baseline.pth", map_location=device))
+
+        enhance_and_plot(
+            model,
+            device,
+            infer_files,
+            infer_loader,
+            suffix="baseline"
+        )
+
+    else:
+        for config in configs:
+            print(f"\n------ Enhancing: {config['name']} ------")
+
+            model = UNet(
+                use_ca=config["use_ca"],
+                use_sa=config["use_sa"]
+            ).to(device)
+
+            ckpt_path = f"ckpt/best_model_{config['name']}.pth"
+            model.load_state_dict(torch.load(ckpt_path, map_location=device))
+
+            enhance_and_plot(
+                model,
+                device,
+                infer_files,
+                infer_loader,
+                suffix=config["name"]
+            )
+
+            del model
+            released = gc.collect()
+            torch.cuda.empty_cache()
+
+            print(f"Collected {released} objects.")
+
 
 if __name__ == "__main__":
     BATCH_SIZE = 8
@@ -549,10 +730,10 @@ if __name__ == "__main__":
     EPS = 1e-12
 
     configs = [
-        {"name": "baseline", "use_ca": False, "use_skip_attn": False},
-        {"name": "ca",       "use_ca": True,  "use_skip_attn": False},
-        {"name": "skip",     "use_ca": False, "use_skip_attn": True},
-        {"name": "ca_skip",  "use_ca": True,  "use_skip_attn": True},
+        {"name": "baseline", "use_ca": False, "use_sa": False},
+        {"name": "ca", "use_ca": True, "use_sa": False},
+        {"name": "sa", "use_ca": False, "use_sa": True},
+        {"name": "ca_sa", "use_ca": True, "use_sa": True},
     ]
 
     main(configs)

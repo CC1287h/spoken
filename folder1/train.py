@@ -235,7 +235,7 @@ def main(configs=None):
 
             model = UNet(
                 use_ca=config["use_ca"],
-                use_skip_attn=config["use_skip_attn"]
+                use_sa=config["use_sa"]
             ).to(device)
 
             optimizer = torch.optim.Adam(model.parameters(), lr=LR)
@@ -274,10 +274,10 @@ if __name__ == "__main__":
     EPS = 1e-12
 
     configs = [
-        {"name": "baseline", "use_ca": False, "use_skip_attn": False},
-        # {"name": "ca",       "use_ca": True,  "use_skip_attn": False},
-        # {"name": "skip",     "use_ca": False, "use_skip_attn": True},
-        # {"name": "ca_skip",  "use_ca": True,  "use_skip_attn": True},
+        {"name": "baseline", "use_ca": False, "use_sa": False},
+        {"name": "ca", "use_ca": True, "use_sa": False},
+        {"name": "sa", "use_ca": False, "use_sa": True},
+        {"name": "ca_sa", "use_ca": True, "use_sa": True},
     ]
 
     set_seed(42)

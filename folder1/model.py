@@ -64,10 +64,10 @@ class DoubleConv(nn.Module):
 
 # ===== U-Net =====
 class UNet(nn.Module):
-    def __init__(self, use_ca=False, use_skip_attn=False):
+    def __init__(self, use_ca=False, use_sa=False):
         super().__init__()
 
-        self.use_skip_attn = use_skip_attn
+        self.use_skip_attn = use_sa
 
         # Encoder
         self.enc1 = DoubleConv(1, 32, use_ca)
@@ -90,7 +90,7 @@ class UNet(nn.Module):
         self.dec1 = DoubleConv(64, 32, use_ca)
 
         # Skip Attention
-        if use_skip_attn:
+        if use_sa:
             self.att3 = AttentionGate(128, 128, 64)
             self.att2 = AttentionGate(64, 64, 32)
             self.att1 = AttentionGate(32, 32, 16)
