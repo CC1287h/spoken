@@ -142,7 +142,15 @@ results/reevaluated_summary.csv
 
 用途：根据 `outputs/` 中的增强结果生成图像。
 
-支持两种常用模式：
+默认会以 `16000 Hz` 加载音频后再绘图，保证可视化采样率统一。
+
+当前仓库中的 `figures/` 只保留最终展示用的 3 条代表性样本，对应命令为：
+
+```powershell
+python scripts/make_figures.py --files p232_290.wav p257_098.wav p232_006.wav --methods spectral_subtraction frequency_masking wavelet_denoise --target-sr 16000
+```
+
+脚本仍支持两种生成模式：
 
 - `--num-files N`: 按顺序生成前 N 条样本的图
 - `--files file1.wav file2.wav ...`: 只为指定样本生成图，适合最终 PPT 筛图
@@ -160,5 +168,4 @@ figures/spectrogram_comparison/
 2. 运行 `python scripts/run_parameter_search.py` 查看参数效果。
 3. 根据参数搜索结果修改 `src/spoken_denoise/methods.py` 的默认参数。
 4. 运行 `python scripts/run_all_methods.py` 生成最终 wav 和指标。
-5. 运行 `python scripts/make_figures.py` 生成 PPT 图。
-
+5. 运行 `python scripts/make_figures.py --files p232_290.wav p257_098.wav p232_006.wav --methods spectral_subtraction frequency_masking wavelet_denoise --target-sr 16000` 生成 PPT 图。

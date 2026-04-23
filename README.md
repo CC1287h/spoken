@@ -8,7 +8,7 @@
 - `results/final_results.csv`: 每条语音的详细指标
 - `results/final_summary.csv`: 各方法平均指标
 - `results/parameter_search.csv`: 参数搜索结果
-- `figures/`: 最终展示用波形图和语谱图
+- `figures/`: 最终展示用波形图和语谱图，只包含 3 条代表性样本
 - `docs/experiment_report.md`: 实验报告
 - `docs/code_structure.md`: 代码结构说明
 
@@ -80,17 +80,21 @@ python scripts/run_parameter_search.py
 python scripts/evaluate_results.py
 ```
 
-生成波形和语谱图对比：
+生成最终展示用波形图和语谱图：
 
 ```powershell
-python scripts/make_figures.py
+python scripts/make_figures.py --files p232_290.wav p257_098.wav p232_006.wav --methods spectral_subtraction frequency_masking wavelet_denoise --target-sr 16000
 ```
 
-只生成最终展示图：
+该命令只生成 3 条代表性样本，并先将音频重采样到 `16000 Hz` 再绘图。
+
+如需重新生成其他样本，可改 `--files` 后面的文件名。
 
 ```powershell
-python scripts/make_figures.py --files p232_290.wav p257_098.wav p232_006.wav --methods spectral_subtraction frequency_masking wavelet_denoise
+python scripts/make_figures.py --files file1.wav file2.wav --methods spectral_subtraction frequency_masking wavelet_denoise --target-sr 16000
 ```
+
+如果需要保留原始 `48000 Hz` 采样率作图，可显式传入 `--target-sr 48000`。
 
 ## Final Results
 
@@ -130,6 +134,6 @@ python scripts/make_figures.py --files p232_290.wav p257_098.wav p232_006.wav --
 - `results/final_results.csv`: 每条语音的详细指标
 - `results/final_summary.csv`: 各方法的平均指标
 - `results/parameter_search.csv`: 参数搜索结果
-- `figures/`: 波形和语谱图对比图（可根据此写论文和ppt）
+- `figures/`: 最终展示用波形图和语谱图（3 条样本 x 3 种方法）
 - `docs/experiment_report.md`: 实验报告（可根据此写论文和ppt）
 - `docs/code_structure.md`: 代码结构说明

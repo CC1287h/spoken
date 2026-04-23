@@ -21,7 +21,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--methods", nargs="+", default=None, help="Output method directories to plot.")
     parser.add_argument("--files", nargs="+", default=None, help="Specific wav file names to visualize, such as p232_003.wav.")
     parser.add_argument("--num-files", type=int, default=3)
-    parser.add_argument("--target-sr", type=int, default=None)
+    parser.add_argument(
+        "--target-sr",
+        type=int,
+        default=16000,
+        help="Sample rate used for loading audio before visualization. Defaults to 16000 Hz.",
+    )
     return parser.parse_args()
 
 

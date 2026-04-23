@@ -141,8 +141,10 @@ results/final_summary.csv
 运行：
 
 ```powershell
-python scripts/make_figures.py
+python scripts/make_figures.py --files p232_290.wav p257_098.wav p232_006.wav --methods spectral_subtraction frequency_masking wavelet_denoise --target-sr 16000
 ```
+
+该命令只为最终展示选中的 3 条代表性样本生成图像，并先将音频重采样到 `16000 Hz`。
 
 输出：
 
@@ -163,11 +165,13 @@ figures/spectrogram_comparison/
 - `p257_098.wav`: 强噪声样本，谱减法 `SNR Improvement=16.994 dB`，频域掩蔽 `SNR Improvement=15.128 dB`
 - `p232_006.wav`: 局限性样本，谱减法 `SNR Improvement=-0.870 dB`，而频域掩蔽仍有 `0.808 dB` 提升
 
-推荐重新生成最终 PPT 用图：
+重新生成最终 PPT 用图的完整命令：
 
 ```powershell
-python scripts/make_figures.py --files p232_290.wav p257_098.wav p232_006.wav --methods spectral_subtraction frequency_masking wavelet_denoise
+python scripts/make_figures.py --files p232_290.wav p257_098.wav p232_006.wav --methods spectral_subtraction frequency_masking wavelet_denoise --target-sr 16000
 ```
+
+如果需要按原始数据的 `48000 Hz` 采样率作图，可追加 `--target-sr 48000`。
 
 如果希望 `figures/` 目录中只保留最终展示图，可以先删除旧的 `figures/` 目录，再运行上面的命令。
 
@@ -211,5 +215,5 @@ PPT 中优先展示以下语谱图：
 pip install -r requirements.txt
 python scripts/run_parameter_search.py
 python scripts/run_all_methods.py
-python scripts/make_figures.py --files p232_290.wav p257_098.wav p232_006.wav --methods spectral_subtraction frequency_masking wavelet_denoise
+python scripts/make_figures.py --files p232_290.wav p257_098.wav p232_006.wav --methods spectral_subtraction frequency_masking wavelet_denoise --target-sr 16000
 ```
