@@ -413,7 +413,7 @@ Saved to:
 #### Audio Output (save mode)
 
 Saved enhanced audio:
-`results/{exp_name}/*.wav`
+`outputs/{exp_name}/*.wav`
 
 #### Figures (plot mode)
 
@@ -738,7 +738,7 @@ Saved to:
 #### (2) Audio Output (save mode)
 
 Enhanced audio is saved as:
-`results/{exp_name}/*.wav`
+`outputs/{exp_name}/*.wav`
 
 #### (3) Visualization Output (plot mode)
 
@@ -1194,7 +1194,7 @@ python model1/evaluate.py --multi_run --mode eval
 #### 音频输出（save 模式）
 
 保存增强后的音频：
-`results/{exp_name}/*.wav`
+`outputs/{exp_name}/*.wav`
 
 #### 图像（plot 模式）
 
@@ -1519,7 +1519,7 @@ python model2/evaluate.py --exp_name complex --mode all
 #### (2) 音频输出（save 模式）
 
 增强后的音频保存为：
-`results/{exp_name}/*.wav`
+`outputs/{exp_name}/*.wav`
 
 #### (3) 可视化输出（plot 模式）
 

@@ -415,7 +415,7 @@ def evaluate_full(model, test_loader, device, sample_rate, eps=1e-12):
 def enhance_and_save(model, device, test_files, infer_loader, suffix):
     model.eval()
 
-    save_dir = RES_DIR / suffix
+    save_dir = OUT_DIR / suffix
     save_dir.mkdir(parents=True, exist_ok=True)
 
     global_idx = 0
@@ -667,6 +667,7 @@ if __name__ == "__main__":
     BASE_DIR = Path(__file__).resolve().parent.parent
     CKPT_DIR = BASE_DIR / "ckpt"
     RES_DIR = BASE_DIR / "results"
+    OUT_DIR = BASE_DIR / "outputs"
     FIG_DIR = BASE_DIR / "figures"
 
     args = parse_args()
