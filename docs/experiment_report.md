@@ -1,219 +1,130 @@
-# 传统语音增强实验报告
+# 语音增强课程作业实验报告
 
 ## 1. 实验目标
 
-本实验使用 Edinburgh DataShare 的 Noisy speech database，比较三种传统语音增强算法在官方测试集上的降噪效果：
+本课程作业围绕带噪语音增强任务展开，目标是在保留语音主体信息的同时尽可能抑制背景噪声，并通过统一指标比较不同方法的表现。
 
-- Spectral Subtraction
-- Wavelet Denoising
-- Frequency Masking
+本作业按照以下路线完成：
 
-实验目标不是训练模型，而是构建可复现的传统算法 baseline，为后续神经网络方法提供对比。
+1. 先实现经典语音增强方法，建立 baseline。
+2. 再实现神经网络方法，提升语音增强性能。
+3. 最后对所有方法进行统一评估与总结。
 
 ## 2. 数据集
 
-使用官方测试集：
+实验使用 Edinburgh DataShare 提供的 Noisy speech database。数据包含带噪语音与对应干净语音，可用于监督式语音增强实验。
 
-- 输入：`data/noisy_testset_wav/`
-- 参考答案：`data/clean_testset_wav/`
+本作业主要使用：
 
-代码按相同文件名进行配对。例如：
+- `data/noisy_testset_wav/`
+- `data/clean_testset_wav/`
 
-```text
-data/noisy_testset_wav/p232_001.wav
-data/clean_testset_wav/p232_001.wav
-```
+输入为 noisy speech，输出为 enhanced speech，参考标签为 clean speech。
 
-每条 noisy 语音经过算法处理后得到 enhanced 语音，再与 clean 语音计算客观指标。
+## 3. 评价指标
 
-## 3. 方法
-
-### 3.1 Spectral Subtraction
-
-谱减法使用语音前若干帧估计噪声频谱，然后从带噪语音的幅度谱中减去噪声幅度谱。该方法是传统语音增强中常见的 baseline，优点是简单、可解释，缺点是容易产生 musical noise。
-
-默认参数：
-
-```text
-alpha = 2.0
-beta = 0.02
-noise_frames = 6
-```
-
-### 3.2 Wavelet Denoising
-
-小波降噪先对语音做小波分解，再对细节系数做阈值处理，最后重构语音。该方法适合抑制部分高频噪声，但对非平稳噪声的效果依赖阈值选择。
-
-默认参数：
-
-```text
-wavelet = db4
-threshold_scale = 1.0
-mode = soft
-```
-
-### 3.3 Frequency Masking
-
-频域掩蔽方法在 STFT 时频域中估计每个 time-frequency bin 的语音/噪声比例，对低信噪比区域进行抑制，对高信噪比区域尽量保留。
-
-默认参数：
-
-```text
-threshold = 2.0
-mask_floor = 0.05
-noise_frames = 6
-```
-
-## 3.4 参数选择依据
-
-已运行 `python scripts/run_parameter_search.py`，结果保存于 `results/parameter_search.csv`。根据全测试集参数搜索结果，当前采用以下默认参数：
-
-| Method | Selected Params | Selection Reason |
-|---|---|---|
-| Spectral Subtraction | `alpha=2.0, beta=0.02, noise_frames=6` | SNR Improvement、MAE、MSE、RMSE 最优，PESQ 与最佳值非常接近 |
-| Wavelet Denoising | `wavelet=db4, threshold_scale=1.0, mode=soft` | SNR Improvement、MAE、MSE、RMSE 在小波配置中最优 |
-| Frequency Masking | `threshold=2.0, mask_floor=0.05, noise_frames=6` | SNR Improvement、MAE、MSE、RMSE、PESQ 均为频域掩蔽配置中最优 |
-
-## 4. 评价指标
-
-本实验从波形误差、信噪比和感知质量三个角度评价降噪效果。
+实验统一采用以下指标：
 
 | 指标 | 趋势 | 含义 |
 |---|---|---|
-| SNR | 越高越好 | 干净语音能量与残留误差能量的比例 |
-| SNR Improvement | 越高越好 | 降噪后相对 noisy input 的 SNR 提升 |
-| MAE | 越低越好 | 降噪语音与 clean 语音的平均绝对误差 |
-| MSE | 越低越好 | 降噪语音与 clean 语音的均方误差 |
-| RMSE | 越低越好 | 均方根误差 |
-| PESQ | 越高越好 | 语音感知质量指标 |
-| STOI | 越高越好 | 语音可懂度指标 |
+| SNRI | 越高越好 | 增强后相对带噪语音的信噪比提升 |
+| MAE | 越低越好 | 与干净语音的平均绝对误差 |
+| RMSE | 越低越好 | 与干净语音的均方根误差 |
+| PESQ | 越高越好 | 感知语音质量 |
+| STOI | 越高越好 | 语音可懂度 |
 
-判断算法有效的主要依据：
+## 4. 经典方法实验
 
-- `SNR Improvement > 0`
-- `MAE / MSE / RMSE` 低于 noisy input
-- `PESQ / STOI` 高于 noisy input
-- 语谱图中背景噪声能量被抑制，语音主结构仍然保留
+本作业实现了三种经典语音增强方法：
 
-## 5. 参数搜索
+### 4.1 Spectral Subtraction
 
-运行：
+谱减法通过估计噪声频谱并从带噪语音频谱中进行减法抑制，是经典语音增强方法中的典型 baseline。
 
-```powershell
-python scripts/run_parameter_search.py
-```
+### 4.2 Wavelet Denoising
 
-输出：
+小波降噪通过小波分解和阈值处理压制噪声，但对复杂噪声的适应性相对有限。
 
-```text
-results/parameter_search.csv
-```
+### 4.3 Frequency Masking
 
-参数搜索用于选择各方法在测试集上的较优配置。最终报告中应说明采用的参数，以及这些参数相比其他配置的指标变化。
+频域掩蔽方法在时频域中对低信噪比区域进行抑制，相比简单谱减法更灵活。
 
-## 6. 最终实验
+### 4.4 经典方法结果
 
-运行：
-
-```powershell
-python scripts/run_all_methods.py
-```
-
-输出：
-
-```text
-outputs/
-results/final_results.csv
-results/final_summary.csv
-```
-
-最终汇总表建议放入 PPT：
-
-| Method | SNR Improvement | MAE | RMSE | PESQ | STOI |
+| Method | SNRI | MAE | RMSE | PESQ | STOI |
 |---|---:|---:|---:|---:|---:|
-| Noisy Input | 0.000 | 0.023733 | 0.030315 | 1.967331 | 0.921063 |
-| Spectral Subtraction | 5.445068 | 0.010806 | 0.015594 | 2.294208 | 0.911659 |
-| Wavelet Denoising | 0.220296 | 0.023010 | 0.029433 | 2.093818 | 0.915433 |
-| Frequency Masking | 4.223062 | 0.013048 | 0.018704 | 2.232847 | 0.919065 |
+| Noisy Input | 0.000 | 0.024 | 0.030 | 1.967 | 0.921 |
+| Spectral Subtraction | 5.445 | 0.010 | 0.0156 | 2.2948 | 0.912 |
+| Wavelet Denoising | 0.220 | 0.023 | 0.029 | 2.094 | 0.915 |
+| Frequency Masking | 4.223 | 0.013 | 0.019 | 2.233 | 0.919 |
 
-## 7. 可视化
+### 4.5 经典方法分析
 
-运行：
+- `Spectral Subtraction` 是三种经典方法中最好的 baseline。
+- `Frequency Masking` 也优于原始带噪语音，但略弱于谱减法。
+- `Wavelet Denoising` 的提升最有限，在本实验中表现最弱。
 
-```powershell
-python scripts/make_figures.py --files p232_290.wav p257_098.wav p232_006.wav --methods spectral_subtraction frequency_masking wavelet_denoise --target-sr 16000
-```
+## 5. 神经网络实验
 
-该命令只为最终展示选中的 3 条代表性样本生成图像，并先将音频重采样到 `16000 Hz`。
+在完成经典方法后，本作业进一步实现神经网络语音增强模型，最终保留两类主结果。
 
-输出：
+### 5.1 Magnitude Mask U-Net
 
-```text
-figures/waveform_comparison/
-figures/spectrogram_comparison/
-```
+该方法在时频域中预测幅度谱掩码，再与带噪语音频谱相乘得到增强结果。它是本次作业中表现最好的神经网络方法。
 
-报告中建议选择 3 条代表性语音展示：
+### 5.2 Complex Mask U-Net
 
-- 降噪效果明显的样本
-- 降噪效果一般的样本
-- 降噪失败或语音失真的样本
+该方法尝试在复数频谱域中进行建模，显式考虑实部和虚部信息，希望利用更完整的频域表达。
 
-建议最终展示以下 3 条样本：
+### 5.3 神经网络结果
 
-- `p232_290.wav`: 成功样本，谱减法 `SNR Improvement=11.907 dB`，频域掩蔽 `SNR Improvement=16.547 dB`
-- `p257_098.wav`: 强噪声样本，谱减法 `SNR Improvement=16.994 dB`，频域掩蔽 `SNR Improvement=15.128 dB`
-- `p232_006.wav`: 局限性样本，谱减法 `SNR Improvement=-0.870 dB`，而频域掩蔽仍有 `0.808 dB` 提升
+| Method | SNRI | MAE | RMSE | PESQ | STOI |
+|---|---:|---:|---:|---:|---:|
+| Magnitude Mask U-Net | 11.062 | 0.009 | 0.013 | 2.850 | 0.947 |
+| Complex Mask U-Net | 8.545 | 0.015 | 0.020 | 2.595 | 0.935 |
 
-重新生成最终 PPT 用图的完整命令：
+### 5.4 神经网络分析
 
-```powershell
-python scripts/make_figures.py --files p232_290.wav p257_098.wav p232_006.wav --methods spectral_subtraction frequency_masking wavelet_denoise --target-sr 16000
-```
+- 两种神经网络方法都明显优于经典方法。
+- `Magnitude Mask U-Net` 的综合表现最好。
+- `Complex Mask U-Net` 虽然也优于传统方法，但没有超过 `Magnitude Mask U-Net`。
 
-如果需要按原始数据的 `48000 Hz` 采样率作图，可追加 `--target-sr 48000`。
+## 6. 最终总对比
 
-如果希望 `figures/` 目录中只保留最终展示图，可以先删除旧的 `figures/` 目录，再运行上面的命令。
+本课程作业最终只保留如下总表：
 
-PPT 中优先展示以下语谱图：
+| Method | SNRI | MAE | RMSE | PESQ | STOI |
+|---|---:|---:|---:|---:|---:|
+| Noisy Input | 0.000 | 0.024 | 0.030 | 1.967 | 0.921 |
+| Spectral Subtraction | 5.445 | 0.010 | 0.0156 | 2.2948 | 0.912 |
+| Wavelet Denoising | 0.220 | 0.023 | 0.029 | 2.094 | 0.915 |
+| Frequency Masking | 4.223 | 0.013 | 0.019 | 2.233 | 0.919 |
+| Magnitude Mask U-Net | 11.062 | 0.009 | 0.013 | 2.850 | 0.947 |
+| Complex Mask U-Net | 8.545 | 0.015 | 0.020 | 2.595 | 0.935 |
 
-- `figures/spectrogram_comparison/spectral_subtraction/p232_290.png`
-- `figures/spectrogram_comparison/frequency_masking/p232_290.png`
-- `figures/spectrogram_comparison/frequency_masking/p257_098.png`
-- `figures/spectrogram_comparison/spectral_subtraction/p232_006.png`
+## 7. 最终结论
 
-其中前 3 张可作为主结果图，第 4 张可作为失败案例或局限性分析图。
+通过本次课程作业，可以得到以下结论：
 
-推荐展示样本的关键指标如下：
+1. 经典方法能够提供清晰、可解释的 baseline，其中 `Spectral Subtraction` 最优。
+2. 神经网络方法整体显著优于经典方法，说明学习型方法在语音增强任务上更有优势。
+3. 在最终保留的神经网络结果中，`Magnitude Mask U-Net` 是综合表现最好的方案。
+4. `Complex Mask U-Net` 仍然优于传统方法，但未超过 `Magnitude Mask U-Net`。
 
-| File | Method | SNR Improvement | PESQ | STOI | RMSE |
-|---|---|---:|---:|---:|---:|
-| `p232_290.wav` | Spectral Subtraction | 11.906770 | 3.456568 | 0.993893 | 0.011188 |
-| `p232_290.wav` | Frequency Masking | 16.547144 | 3.068395 | 0.996113 | 0.006557 |
-| `p257_098.wav` | Spectral Subtraction | 16.994233 | 1.462737 | 0.754270 | 0.008405 |
-| `p257_098.wav` | Frequency Masking | 15.128176 | 1.565049 | 0.765825 | 0.010419 |
-| `p232_006.wav` | Spectral Subtraction | -0.870246 | 2.255408 | 0.954389 | 0.010311 |
-| `p232_006.wav` | Frequency Masking | 0.808372 | 2.492941 | 0.960724 | 0.008499 |
+因此，本作业的最终最佳方法为：
 
-语谱图解释重点：
+`Magnitude Mask U-Net`
 
-- Noisy 图中是否存在大面积背景噪声能量
-- Enhanced 图中噪声是否被压低
-- Enhanced 图中语音谐波和共振峰是否仍然保留
+## 8. 复现说明
 
-## 8. 结论
-
-在官方测试集上，三种传统方法相对 noisy input 均带来了一定程度的 SNR 提升，但提升幅度差异明显。其中，谱减法表现最强，平均 `SNR Improvement` 为 `5.445 dB`，同时取得最低的 `MAE` 与 `RMSE`，说明其在整体误差控制和噪声抑制上最有效。频域掩蔽次之，平均 `SNR Improvement` 为 `4.223 dB`，`PESQ` 也明显高于 noisy input，说明其在语音质量和降噪强度之间取得了较好的平衡。
-
-小波降噪的平均 `SNR Improvement` 仅为 `0.220 dB`，虽然相对 noisy input 在 `PESQ` 上有一定提升，但整体降噪能力明显弱于谱减法和频域掩蔽，更适合作为较弱的传统对照方法。从总体结果看，传统方法能够提供可观的 baseline，但在部分样本上仍会出现降噪不足或语音失真，尤其是不同指标之间存在取舍，例如某些样本上 SNR 提升明显但 `STOI` 未同步提高。因此，本实验结果可以作为后续神经网络语音增强方法的公平对比基线，也说明单纯依赖传统算法在复杂噪声场景下仍存在性能上限。
-
-从单条样本可视化结果看，`p232_290.wav` 最适合展示传统方法在典型样本上的成功效果，`p257_098.wav` 适合展示困难噪声场景下的可见改善，而 `p232_006.wav` 则能清楚说明谱减法在部分样本上可能退化。这组成功样本与失败样本的组合，能够更完整地展示传统方法的优势与局限。
-
-## 9. 复现步骤
+经典方法相关命令如下：
 
 ```powershell
 pip install -r requirements.txt
 python scripts/run_parameter_search.py
 python scripts/run_all_methods.py
+python scripts/evaluate_results.py
 python scripts/make_figures.py --files p232_290.wav p257_098.wav p232_006.wav --methods spectral_subtraction frequency_masking wavelet_denoise --target-sr 16000
 ```
+
+仓库中已保留主要神经网络结果文件与模型权重。

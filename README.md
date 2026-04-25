@@ -1,40 +1,33 @@
-# Spoken Speech Enhancement Experiments
+# 语音增强课程作业
 
-本仓库用于传统语音增强算法实验，对 Edinburgh DataShare 的成对数据集进行降噪、评估和可视化。
+本仓库是一份完整的语音增强课程作业实现。整体思路是先完成经典语音增强方法，建立传统 baseline；再引入神经网络方法；最后使用统一指标对所有方法进行比较，并给出总结结论。
 
-当前仓库已经包含：
+## 作业内容
 
-- `outputs/`: 三种传统方法在官方测试集上的增强后 wav
-- `results/final_results.csv`: 每条语音的详细指标
-- `results/final_summary.csv`: 各方法平均指标
-- `results/parameter_search.csv`: 参数搜索结果
-- `figures/`: 最终展示用波形图和语谱图，只包含 3 条代表性样本
-- `docs/experiment_report.md`: 传统方法实验报告
-- `docs/code_structure.md`: 代码结构说明
-- `folder1/`、`folder2/`: 合并进来的神经语音增强训练与评估代码
-- `ckpt/`: 神经方法训练得到的模型权重
+本作业主要完成了两部分：
 
-因此，如果组内同学只是需要：
+1. 经典语音增强方法
+2. 神经网络语音增强方法
 
-- 写实验结果
-- 看最终指标
-- 插入图到 PPT 或文档
+经典方法部分实现了：
 
-可以直接使用仓库中的 `results/`、`figures/`、`docs/` 和 `outputs/`，不需要重新跑完整实验。
+- Spectral Subtraction
+- Wavelet Denoising
+- Frequency Masking
 
-## Dataset
+神经网络部分最终保留两类主结果：
 
-原始测试数据集未随仓库上传，需要自行下载并解压：
+- Magnitude Mask U-Net
+- Complex Mask U-Net
+
+## 数据集
+
+实验基于 Edinburgh DataShare 提供的 Noisy speech database 配对语音数据开展。仓库未直接附带原始数据，需要自行下载。
 
 数据集页面：
 https://datashare.ed.ac.uk/handle/10283/2791
 
-本实验只需要两个测试集压缩包：
-
-- `data/noisy_testset_wav/`: 官方带噪测试语音
-- `data/clean_testset_wav/`: 官方干净参考语音
-
-解压后目录应为：
+测试集目录应为：
 
 ```text
 data/
@@ -42,102 +35,70 @@ data/
   clean_testset_wav/
 ```
 
-## Install
+## 最终结果表
+
+ 6 个方法的结果：
+
+| Method | SNRI | MAE | RMSE | PESQ | STOI |
+|---|---:|---:|---:|---:|---:|
+| Noisy Input | 0.000 | 0.024 | 0.030 | 1.967 | 0.921 |
+| Spectral Subtraction | 5.445 | 0.010 | 0.0156 | 2.2948 | 0.912 |
+| Wavelet Denoising | 0.220 | 0.023 | 0.029 | 2.094 | 0.915 |
+| Frequency Masking | 4.223 | 0.013 | 0.019 | 2.233 | 0.919 |
+| Magnitude Mask U-Net | 11.062 | 0.009 | 0.013 | 2.850 | 0.947 |
+| Complex Mask U-Net | 8.545 | 0.015 | 0.020 | 2.595 | 0.935 |
+
+## 结论
+
+- 在经典方法中，`Spectral Subtraction` 是表现最好的传统 baseline。
+- `Wavelet Denoising` 效果最弱，提升有限。
+- `Frequency Masking` 也优于原始带噪输入，但整体仍弱于最优神经网络方法。
+- 神经网络方法整体优于经典方法。
+- 最终保留的神经网络结果中，`Magnitude Mask U-Net` 表现最好，是本次课程作业的最佳方案。
+- `Complex Mask U-Net` 虽然优于经典方法，但仍未超过 `Magnitude Mask U-Net`。
+
+## 仓库说明
+
+### 经典方法代码
+
+- `src/spoken_denoise/`
+- `scripts/run_parameter_search.py`
+- `scripts/run_all_methods.py`
+- `scripts/evaluate_results.py`
+- `scripts/make_figures.py`
+
+### 神经网络代码
+
+- `folder1/`: Magnitude Mask U-Net 路线
+- `folder2/`: Complex Mask U-Net 路线
+- `ckpt/`: 已训练权重
+
+### 结果与文档
+
+- `results/final_summary.csv`: 经典方法汇总结果
+- `results/eval_full_baseline.csv`: Magnitude Mask U-Net 结果来源
+- `results/eval_full_com.csv`: Complex Mask U-Net 结果来源
+- `docs/experiment_report.md`: 完整实验报告
+- `docs/code_structure.md`: 代码结构说明
+
+## 复现命令
+
+安装依赖：
 
 ```powershell
 pip install -r requirements.txt
 ```
 
-## Quick Use
-
-如果只想查看最终实验结果，优先看：
-
-- `results/final_summary.csv`
-- `docs/experiment_report.md`
-- `figures/spectrogram_comparison/`
-
-如果只想听增强结果，直接查看：
-
-- `outputs/spectral_subtraction/`
-- `outputs/frequency_masking/`
-- `outputs/wavelet_denoise/`
-
-## Run
-
-运行三种传统算法并生成最终指标：
-
-```powershell
-python scripts/run_all_methods.py
-```
-
-运行参数搜索：
+运行经典方法：
 
 ```powershell
 python scripts/run_parameter_search.py
-```
-
-根据输出 wav 重新评估：
-
-```powershell
+python scripts/run_all_methods.py
 python scripts/evaluate_results.py
 ```
 
-生成最终展示用波形图和语谱图：
+生成展示图像：
 
 ```powershell
 python scripts/make_figures.py --files p232_290.wav p257_098.wav p232_006.wav --methods spectral_subtraction frequency_masking wavelet_denoise --target-sr 16000
 ```
-
-该命令只生成 3 条代表性样本，并先将音频重采样到 `16000 Hz` 再绘图。
-
-如需重新生成其他样本，可改 `--files` 后面的文件名。
-
-```powershell
-python scripts/make_figures.py --files file1.wav file2.wav --methods spectral_subtraction frequency_masking wavelet_denoise --target-sr 16000
-```
-
-如果需要保留原始 `48000 Hz` 采样率作图，可显式传入 `--target-sr 48000`。
-
-## Final Results
-
-当前最终汇总结果如下：
-
-| Method | SNR Improvement | MAE | RMSE | PESQ | STOI |
-|---|---:|---:|---:|---:|---:|
-| Noisy Input | 0.000000 | 0.023733 | 0.030315 | 1.967331 | 0.921063 |
-| Spectral Subtraction | 5.445068 | 0.010806 | 0.015594 | 2.294208 | 0.911659 |
-| Wavelet Denoising | 0.220296 | 0.023010 | 0.029433 | 2.093818 | 0.915433 |
-| Frequency Masking | 4.223062 | 0.013048 | 0.018704 | 2.232847 | 0.919065 |
-
-结论概括：
-
-- `spectral_subtraction` 是整体最强的传统 baseline，`SNR Improvement` 最高，误差最低。
-- `frequency_masking` 次之，语音质量提升也比较稳定。
-- `wavelet_denoise` 提升较弱，更适合作为对照方法。
-
-## Recommended Figures
-
-推荐 PPT 重点使用以下语谱图：
-
-- `figures/spectrogram_comparison/spectral_subtraction/p232_290.png`
-- `figures/spectrogram_comparison/frequency_masking/p232_290.png`
-- `figures/spectrogram_comparison/frequency_masking/p257_098.png`
-- `figures/spectrogram_comparison/spectral_subtraction/p232_006.png`
-
-其中：
-
-- `p232_290.wav` 是成功样本
-- `p257_098.wav` 是强噪声样本
-- `p232_006.wav` 是失败/局限性样本
-
-## Repository Contents
-
-- `outputs/`: 降噪后的 wav 文件
-- `results/final_results.csv`: 每条语音的详细指标
-- `results/final_summary.csv`: 各方法的平均指标
-- `results/parameter_search.csv`: 参数搜索结果
-- `figures/`: 最终展示用波形图和语谱图（3 条样本 x 3 种方法）
-- `docs/experiment_report.md`: 实验报告（可根据此写论文和ppt）
-- `docs/code_structure.md`: 代码结构说明
-- `folder1/`、`folder2/`: 神经语音增强实验代码
-- `ckpt/`: 神经方法训练好的权重文件
