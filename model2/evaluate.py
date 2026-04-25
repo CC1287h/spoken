@@ -569,11 +569,6 @@ def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # ===== argument sanity check =====
-    if args.multi_run and args.exp_name != "complex":
-        print(
-            "[Warning] --multi_run enabled: using configs, ignoring exp_name / single-model loading"
-        )
-
     valid_num_examples_modes = ["play", "all"]
 
     if args.mode not in valid_num_examples_modes and args.num_examples != 4:
@@ -598,7 +593,7 @@ def main(args):
 
     # ===== test set =====
     if use_subset:
-        print(f"Using subset with SNR={args.snr}")
+        print(f"Using subset with SNR = {args.snr}")
         test_files = load_subset(DatasetConfig.test_txt, noise_type=None, snr=args.snr)
     else:
         print("Using full test set")
@@ -623,7 +618,7 @@ def main(args):
     ckpt_path = CKPT_DIR / f"best_model_{args.exp_name}.pth"
     model.load_state_dict(torch.load(ckpt_path, map_location=device))
 
-    print("Loaded best model")
+    print(f"Loaded model from {ckpt_path}")
 
     # ===== run pipeline =====
     run_model(args, model, test_loader, infer_loader, infer_files, device, EPS)

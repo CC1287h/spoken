@@ -614,6 +614,8 @@ def run_multi(args, configs, test_loader, infer_loader, infer_files, device):
         ckpt_path = CKPT_DIR / f"best_model_{config['name']}.pth"
         model.load_state_dict(torch.load(ckpt_path, map_location=device))
 
+        print(f"Loaded model from {ckpt_path}")
+
         summary = run_model(
             args,
             model,
@@ -629,8 +631,11 @@ def run_multi(args, configs, test_loader, infer_loader, infer_files, device):
             all_results[config["name"]] = summary
 
         del model
-        gc.collect()
+        del optimizer
+        released = gc.collect()
         torch.cuda.empty_cache()
+
+        print(f"\nCollected {released} objects.")
 
     if args.mode in ["full", "all"] and all_results:
         summary_df = pd.DataFrame(all_results).T
@@ -675,7 +680,7 @@ def main(args, configs=None):
 
     # ===== test set =====
     if use_subset:
-        print(f"Using subset with SNR={args.snr}")
+        print(f"Using subset with SNR = {args.snr}")
         test_files = load_subset(DatasetConfig.test_txt, noise_type=None, snr=args.snr)
     else:
         print("Using full test set")
@@ -723,6 +728,8 @@ def main(args, configs=None):
 
         ckpt_path = CKPT_DIR / f"best_model_{args.exp_name}.pth"
         model.load_state_dict(torch.load(ckpt_path, map_location=device))
+
+        print(f"Loaded model from {ckpt_path}")
 
         run_model(
             args,

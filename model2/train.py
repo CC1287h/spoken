@@ -212,7 +212,9 @@ def train(
             args.lambda3,
             eps,
         )
-        val_loss = evaluate(model, test_loader, device, eps)
+        val_loss = evaluate(
+            model, test_loader, device, args.lambda1, args.lambda2, args.lambda3, eps
+        )
 
         print(f"Train Loss: {train_loss:.4f}")
         print(f"Val Loss:   {val_loss:.4f}")
