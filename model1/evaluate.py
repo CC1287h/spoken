@@ -575,13 +575,20 @@ def run_model(
     # playback / quick eval
     if args.mode in ["play"]:
         evaluate_and_play(
-            model, test_loader, device, num_examples=args.num_examples, eps=eps
+            model,
+            test_loader,
+            device,
+            args.num_examples,
+            args.lambda1,
+            args.lambda2,
+            args.lambda3,
+            eps,
         )
 
     # full evaluation
     if args.mode in ["eval", "all"]:
         df, summary = evaluate_full(
-            model, test_loader, device, DatasetConfig.sample_rate, eps=eps
+            model, test_loader, device, DatasetConfig.sample_rate, eps
         )
         save_to_csv(df, RES_DIR / f"eval_full_{exp_name}.csv")
 
@@ -750,6 +757,10 @@ def parse_args():
 
     parser.add_argument("--use_ca", action="store_true")
     parser.add_argument("--use_sa", action="store_true")
+
+    parser.add_argument("--lambda1", type=float, default=1.0)
+    parser.add_argument("--lambda2", type=float, default=0.0005)
+    parser.add_argument("--lambda3", type=float, default=0.0)
 
     parser.add_argument("--exp_name", type=str, default="baseline")
 

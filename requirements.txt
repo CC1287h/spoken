@@ -5,6 +5,9 @@ soundfile
 matplotlib
 PyWavelets
 pandas
+torch
+torchaudio
+torchcodec
 tqdm
 pesq
 pystoi

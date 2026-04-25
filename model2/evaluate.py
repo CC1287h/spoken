@@ -536,13 +536,20 @@ def run_model(args, model, test_loader, infer_loader, infer_files, device, eps=1
     # playback / quick eval
     if args.mode in ["play", "all"]:
         evaluate_and_play(
-            model, test_loader, device, num_examples=args.num_examples, eps=eps
+            model,
+            test_loader,
+            device,
+            args.num_examples,
+            args.lambda1,
+            args.lambda2,
+            args.lambda3,
+            eps,
         )
 
     # full evaluation
     if args.mode in ["eval", "all"]:
         df, summary = evaluate_full(
-            model, test_loader, device, DatasetConfig.sample_rate, eps=eps
+            model, test_loader, device, DatasetConfig.sample_rate, eps
         )
         save_to_csv(df, RES_DIR / f"eval_full_{args.exp_name}.csv")
 
@@ -635,7 +642,13 @@ def parse_args():
         choices=["play", "eval", "save", "plot", "all"],
     )
 
+    parser.add_argument("--lambda1", type=float, default=1.0)
+    parser.add_argument("--lambda2", type=float, default=0.0005)
+    parser.add_argument("--lambda3", type=float, default=5.0)
+
     parser.add_argument("--exp_name", type=str, default="complex")
+
+    parser.add_argument("--num_examples", type=int, default=4)
 
     parser.add_argument(
         "--use_subset", action="store_true", help="Use subset instead of full test set"
