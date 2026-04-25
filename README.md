@@ -9,8 +9,10 @@
 - `results/final_summary.csv`: 各方法平均指标
 - `results/parameter_search.csv`: 参数搜索结果
 - `figures/`: 最终展示用波形图和语谱图，只包含 3 条代表性样本
-- `docs/experiment_report.md`: 实验报告
+- `docs/experiment_report.md`: 传统方法实验报告
 - `docs/code_structure.md`: 代码结构说明
+- `folder1/`、`folder2/`: 合并进来的神经语音增强训练与评估代码
+- `ckpt/`: 神经方法训练得到的模型权重
 
 因此，如果组内同学只是需要：
 
@@ -137,3 +139,5 @@ python scripts/make_figures.py --files file1.wav file2.wav --methods spectral_su
 - `figures/`: 最终展示用波形图和语谱图（3 条样本 x 3 种方法）
 - `docs/experiment_report.md`: 实验报告（可根据此写论文和ppt）
 - `docs/code_structure.md`: 代码结构说明
+- `folder1/`、`folder2/`: 神经语音增强实验代码
+- `ckpt/`: 神经方法训练好的权重文件

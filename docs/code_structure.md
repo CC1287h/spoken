@@ -27,6 +27,25 @@ spoken/
     evaluate_results.py
     make_figures.py
 
+  ckpt/
+    best_model_baseline.pth
+    best_model_ca.pth
+    best_model_ca_sa.pth
+    best_model_complex.pth
+    best_model_sa.pth
+
+  folder1/
+    dataset.py
+    evaluate.py
+    model.py
+    train.py
+
+  folder2/
+    dataset.py
+    evaluate.py
+    model.py
+    train.py
+
   outputs/
   results/
   figures/
@@ -161,6 +180,16 @@ python scripts/make_figures.py --files p232_290.wav p257_098.wav p232_006.wav --
 figures/waveform_comparison/
 figures/spectrogram_comparison/
 ```
+
+## 额外合并内容
+
+本次仓库还合并了另一条神经语音增强分支的产物：
+
+- `ckpt/`: 若干 U-Net 变体训练得到的模型权重
+- `folder1/`: 幅度谱掩码版本的训练与评估代码
+- `folder2/`: 复数谱/相位相关版本的训练与评估代码
+
+这些目录与 `src/spoken_denoise/` 下的传统方法实现是并列关系，主要用于作业展示与结果汇总，不影响原有传统方法脚本的运行。
 
 ## 推荐工作流
 
