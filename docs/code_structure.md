@@ -29,13 +29,13 @@ spoken/
     evaluate_results.py
     make_figures.py
 
-  folder1/
+  model1/
     dataset.py
     model.py
     train.py
     evaluate.py
 
-  folder2/
+  model2/
     dataset.py
     model.py
     train.py
@@ -138,7 +138,7 @@ results/final_summary.csv
 
 神经网络实验对应课程作业的第二阶段，分为两条路线。
 
-### 3.1 `folder1/`: 幅度谱掩码 U-Net 系列
+### 3.1 `model/`: 幅度谱掩码 U-Net 系列
 
 该目录包含基于幅度谱掩码的 U-Net 实现及其注意力变体。
 
@@ -161,7 +161,7 @@ results/final_summary.csv
 
 - `ckpt/best_model_baseline.pth`
 
-### 3.2 `folder2/`: 复数频谱建模路线
+### 3.2 `model2/`: 复数频谱建模路线
 
 该目录对应 Complex U-Net 路线，模型直接学习复数域掩码。
 
@@ -174,7 +174,7 @@ results/final_summary.csv
 
 #### 对应结果
 
-- `results/eval_full_com.csv` -> Complex U-Net
+- `results/eval_full_complex.csv` -> Complex U-Net 评估结果
 - `ckpt/best_model_complex.pth` -> Complex U-Net 最优权重
 
 ## 4. 第三部分：实验结果文件
@@ -188,7 +188,7 @@ results/final_summary.csv
 ### 4.2 神经网络结果
 
 - `results/eval_full_baseline.csv`
-- `results/eval_full_com.csv`
+- `results/eval_full_complex.csv`
 
 课程作业最终表格只采用这两个神经网络结果文件。
 
@@ -197,23 +197,18 @@ results/final_summary.csv
 仓库中还保留了：
 
 - `results/eval_full_ca.csv`
-- `results/eval_full_skip.csv`
-- `results/eval_full_ca_skip.csv`
-- `results/eval_full_mag.csv`
+- `results/eval_full_sa.csv`
+- `results/eval_full_ca_sa.csv`
 
-这些文件属于历史实验结果保留项，不作为最终主结论的核心依据，但可以作为补充参考。
+这些文件是消融实验的结果，可以作为基于幅度谱掩码的 U-Net 的对照。
 
 ## 5. 第四部分：音频与可视化产物
 
 ### 5.1 `outputs/`
 
-保存传统方法生成的增强后音频。
+保存传统方法和神经网络模型输出的增强音频文件。
 
-### 5.2 `results/baseline/`、`results/ca/`、`results/skip/`、`results/ca_skip/`、`results/complex/`
-
-保存神经网络模型输出的增强音频文件。
-
-### 5.3 `figures/`
+### 5.2 `figures/`
 
 保存代表性样本的：
 
