@@ -1,10 +1,10 @@
+import argparse
 import gc
 import matplotlib.pyplot as plt
 import numpy as np
-import os
+from pathlib import Path
 import sounddevice as sd
 import soundfile as sf
-from scipy import signal
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -17,7 +17,7 @@ import pesq
 import pystoi
 
 from model import UNet
-from dataset import DatasetConfig, get_dataloaders, load_subset
+from dataset import DatasetConfig, get_testloader, load_subset
 
 
 def istft_reconstruct(complex_spec):
@@ -26,7 +26,7 @@ def istft_reconstruct(complex_spec):
         window = torch.hann_window(DatasetConfig.n_fft, device=complex_spec.device)
     elif win_type == "hamming":
         window = torch.hamming_window(DatasetConfig.n_fft, device=complex_spec.device)
-    elif win_type  == "rectangular":
+    elif win_type == "rectangular":
         window = torch.ones(DatasetConfig.n_fft, device=complex_spec.device)
     else:
         raise ValueError(f"Unknown window type: {DatasetConfig.window}")
@@ -37,7 +37,7 @@ def istft_reconstruct(complex_spec):
         hop_length=DatasetConfig.hop_length,
         win_length=DatasetConfig.win_length,
         window=window,
-        length=None
+        length=None,
     )
     return wave
 
@@ -50,14 +50,14 @@ def si_sdr_loss(pred, target, eps=1e-12, reduction="mean"):
 
     # projection
     dot = torch.sum(pred * target, dim=1, keepdim=True)
-    target_energy = torch.sum(target ** 2, dim=1, keepdim=True) + eps
+    target_energy = torch.sum(target**2, dim=1, keepdim=True) + eps
 
     scale = dot / target_energy
     proj = scale * target
 
     noise = pred - proj
 
-    ratio = torch.sum(proj ** 2, dim=1) / (torch.sum(noise ** 2, dim=1) + eps)
+    ratio = torch.sum(proj**2, dim=1) / (torch.sum(noise**2, dim=1) + eps)
 
     si_sdr = 10 * torch.log10(ratio + eps)
 
@@ -69,7 +69,7 @@ def si_sdr_loss(pred, target, eps=1e-12, reduction="mean"):
         return loss
     else:
         raise ValueError("reduction must be 'mean' or 'none'")
-    
+
 
 def compute_snr_batch(clean, test, eps=1e-12):
     # clean, test: [B, T]
@@ -79,8 +79,8 @@ def compute_snr_batch(clean, test, eps=1e-12):
 
     noise = test - clean
 
-    signal_power = torch.sum(clean ** 2, dim=1)
-    noise_power = torch.sum(noise ** 2, dim=1)
+    signal_power = torch.sum(clean**2, dim=1)
+    noise_power = torch.sum(noise**2, dim=1)
 
     snr = 10 * torch.log10(signal_power / (noise_power + eps))
     return snr
@@ -88,18 +88,18 @@ def compute_snr_batch(clean, test, eps=1e-12):
 
 def align_signals(*signals: np.ndarray) -> tuple[np.ndarray, ...]:
     min_length = min(len(signal) for signal in signals)
-    return tuple(np.asarray(signal[:min_length], dtype=np.float32) for signal in signals)
+    return tuple(
+        np.asarray(signal[:min_length], dtype=np.float32) for signal in signals
+    )
 
 
-def normalize(x: np.ndarray, eps: float=1e-12):
+def normalize(x: np.ndarray, eps: float = 1e-12):
     return x / (np.max(np.abs(x)) + eps)
 
 
-def compute_snr(clean: np.ndarray, estimate: np.ndarray, eps: float=1e-12):
+def compute_snr(clean: np.ndarray, estimate: np.ndarray, eps: float = 1e-12):
     noise = clean - estimate
-    return 10 * np.log10(
-        np.sum(clean ** 2) / (np.sum(noise ** 2) + eps)
-    )
+    return 10 * np.log10(np.sum(clean**2) / (np.sum(noise**2) + eps))
 
 
 def compute_mae(clean: np.ndarray, estimate: np.ndarray):
@@ -114,12 +114,16 @@ def compute_rmse(clean: np.ndarray, estimate: np.ndarray):
     return np.sqrt(compute_mse(clean, estimate))
 
 
-def _resample_for_perceptual_metric(clean: np.ndarray, estimate: np.ndarray, sample_rate: int, target_rate: int = 16000):
+def _resample_for_perceptual_metric(
+    clean: np.ndarray, estimate: np.ndarray, sample_rate: int, target_rate: int = 16000
+):
     clean, estimate = align_signals(clean, estimate)
 
     if sample_rate != target_rate:
         clean = librosa.resample(clean, orig_sr=sample_rate, target_sr=target_rate)
-        estimate = librosa.resample(estimate, orig_sr=sample_rate, target_sr=target_rate)
+        estimate = librosa.resample(
+            estimate, orig_sr=sample_rate, target_sr=target_rate
+        )
 
     return clean.astype(np.float32), estimate.astype(np.float32), target_rate
 
@@ -179,7 +183,9 @@ def plot_waveform(clean, noisy, enhanced, sample_rate, output_path, title):
     plt.close(fig)
 
 
-def plot_spectrogram(clean, noisy, enhanced, sample_rate, output_path, title, n_fft = 1024, hop_length = 256):
+def plot_spectrogram(
+    clean, noisy, enhanced, sample_rate, output_path, title, n_fft=1024, hop_length=256
+):
     signals = [("Clean", clean), ("Noisy", noisy), ("Enhanced", enhanced)]
 
     fig, axes = plt.subplots(3, 1, figsize=(12, 9.5), sharex=True, sharey=True)
@@ -188,7 +194,14 @@ def plot_spectrogram(clean, noisy, enhanced, sample_rate, output_path, title, n_
     for index, (axis, (label, samples)) in enumerate(zip(axes, signals)):
         spectrum = librosa.stft(samples, n_fft=n_fft, hop_length=hop_length)
         db = librosa.amplitude_to_db(np.abs(spectrum), ref=np.max)
-        image = librosa.display.specshow(db, sr=sample_rate, hop_length=hop_length, x_axis="time", y_axis="hz", ax=axis)
+        image = librosa.display.specshow(
+            db,
+            sr=sample_rate,
+            hop_length=hop_length,
+            x_axis="time",
+            y_axis="hz",
+            ax=axis,
+        )
         axis.set_title(label)
         if index < len(signals) - 1:
             axis.tick_params(labelbottom=False)
@@ -204,8 +217,16 @@ def plot_spectrogram(clean, noisy, enhanced, sample_rate, output_path, title, n_
 
 # evaluation + playback
 @torch.no_grad()
-def evaluate_and_play(model, test_loader, device, num_examples=4,
-                      lambda1=1.0, lambda2=0.005, lambda3=0.0, eps=1e-12):
+def evaluate_and_play(
+    model,
+    test_loader,
+    device,
+    num_examples=4,
+    lambda1=1.0,
+    lambda2=0.005,
+    lambda3=0.0,
+    eps=1e-12,
+):
     model.eval()
 
     examples = 0
@@ -227,16 +248,13 @@ def evaluate_and_play(model, test_loader, device, num_examples=4,
 
         # complex
         noisy_complex = torch.complex(
-            noisy * torch.cos(phase),
-            noisy * torch.sin(phase)
+            noisy * torch.cos(phase), noisy * torch.sin(phase)
         )
         clean_complex = torch.complex(
-            clean * torch.cos(phase),
-            clean * torch.sin(phase)
+            clean * torch.cos(phase), clean * torch.sin(phase)
         )
         enhanced_complex = torch.complex(
-            enhanced * torch.cos(phase),
-            enhanced * torch.sin(phase)
+            enhanced * torch.cos(phase), enhanced * torch.sin(phase)
         )
 
         # waveform
@@ -250,22 +268,20 @@ def evaluate_and_play(model, test_loader, device, num_examples=4,
         clean_log = torch.log(clean_mag + eps)
         enhanced_log = torch.log(enhanced_mag + eps)
 
-        sisdr_loss_per_sample  = si_sdr_loss(enhanced_wave, clean_wave, eps, reduction="none")
+        sisdr_loss_per_sample = si_sdr_loss(
+            enhanced_wave, clean_wave, eps, reduction="none"
+        )
         sisdr_loss = sisdr_loss_per_sample.mean()
 
         spec_loss_map = torch.abs(enhanced_log - clean_log)
         spec_loss_map = spec_loss_map * mask
-        spec_loss_per_sample = (
-            spec_loss_map.sum(dim=(1,2,3)) /
-            (mask.sum(dim=(1,2,3)) + eps)
+        spec_loss_per_sample = spec_loss_map.sum(dim=(1, 2, 3)) / (
+            mask.sum(dim=(1, 2, 3)) + eps
         )
         spec_loss = spec_loss_map.sum() / mask.sum()
 
         complex_loss_map = torch.abs(enhanced_complex - clean_complex)
-        complex_loss_per_sample = torch.mean(
-            complex_loss_map,
-            dim=(1, 2)
-            )
+        complex_loss_per_sample = torch.mean(complex_loss_map, dim=(1, 2))
         complex_loss = torch.mean(complex_loss_map)
 
         loss = lambda1 * sisdr_loss + lambda2 * spec_loss + lambda3 * complex_loss
@@ -274,8 +290,8 @@ def evaluate_and_play(model, test_loader, device, num_examples=4,
         snr_enh_batch = compute_snr_batch(clean_wave, enhanced_wave, eps)
         snr_improve_batch = snr_enh_batch - snr_noisy_batch
 
-        print(f"\nbatch loss: {loss.item():.4f}")
-        print(f"Avg ΔSNR:   {snr_improve_batch.mean():.4f}")
+        print(f"\nBatch loss: {loss.item():.4f}")
+        print(f"Avg SNRI:   {snr_improve_batch.mean():.4f}")
 
         B = noisy_wave.shape[0]
 
@@ -284,8 +300,8 @@ def evaluate_and_play(model, test_loader, device, num_examples=4,
                 int(lengths[i]),
                 clean_wave.shape[1],
                 enhanced_wave.shape[1],
-                noisy_wave.shape[1]
-                )
+                noisy_wave.shape[1],
+            )
 
             noisy_wave_i = noisy_wave[i][:L].cpu().numpy()
             clean_wave_i = clean_wave[i][:L].cpu().numpy()
@@ -309,12 +325,15 @@ def evaluate_and_play(model, test_loader, device, num_examples=4,
             sd.play(clean_wave_i, samplerate=DatasetConfig.sample_rate)
             sd.wait()
 
-            print(f"  SI-SDR loss: {sisdr_loss_per_sample[i].item():.4f}")
-            print(f"  Spec loss:   {spec_loss_per_sample[i].item():.4f}")
-            print(f"  Comp loss:   {complex_loss_per_sample[i].item():.4f}")
-            print(f"  SNR noisy:   {snr_noisy_batch[i].item():.2f} dB")
-            print(f"  SNR enhced:  {snr_enh_batch[i].item():.2f} dB")
-            print(f"  ΔSNR:        {snr_improve_batch[i].item():.2f} dB")
+            print()
+            print("  Loss breakdown:")
+            print(f"    SI-SDR loss: {sisdr_loss_per_sample[i].item():.4f}")
+            print(f"    Spec loss:   {spec_loss_per_sample[i].item():.4f}")
+            print(f"    Comp loss:   {complex_loss_per_sample[i].item():.4f}")
+            print("  SNR:")
+            print(f"    Noisy:       {snr_noisy_batch[i].item():.2f} dB")
+            print(f"    Enhanced:    {snr_enh_batch[i].item():.2f} dB")
+            print(f"    Improvement: {snr_improve_batch[i].item():.2f} dB")
 
             examples += 1
             if examples >= num_examples:
@@ -343,16 +362,13 @@ def evaluate_full(model, test_loader, device, sample_rate, eps=1e-12):
 
         # complex
         noisy_complex = torch.complex(
-            noisy * torch.cos(phase),
-            noisy * torch.sin(phase)
+            noisy * torch.cos(phase), noisy * torch.sin(phase)
         )
         clean_complex = torch.complex(
-            clean * torch.cos(phase),
-            clean * torch.sin(phase)
+            clean * torch.cos(phase), clean * torch.sin(phase)
         )
         enhanced_complex = torch.complex(
-            enhanced * torch.cos(phase),
-            enhanced * torch.sin(phase)
+            enhanced * torch.cos(phase), enhanced * torch.sin(phase)
         )
 
         # waveform
@@ -367,8 +383,8 @@ def evaluate_full(model, test_loader, device, sample_rate, eps=1e-12):
                 int(lengths[i]),
                 clean_wave.shape[1],
                 enhanced_wave.shape[1],
-                noisy_wave.shape[1]
-                )
+                noisy_wave.shape[1],
+            )
 
             noisy_wave_i = noisy_wave[i][:L].cpu().numpy()
             clean_wave_i = clean_wave[i][:L].cpu().numpy()
@@ -387,7 +403,6 @@ def evaluate_full(model, test_loader, device, sample_rate, eps=1e-12):
                 "snr_noisy": snr_noisy,
                 "snr_enh": snr_enh,
                 "snr_improve": snr_enh - snr_noisy,
-
                 "mae": compute_mae(clean_wave_i, enhanced_wave_i),
                 "mse": compute_mse(clean_wave_i, enhanced_wave_i),
                 "rmse": compute_rmse(clean_wave_i, enhanced_wave_i),
@@ -404,7 +419,7 @@ def evaluate_full(model, test_loader, device, sample_rate, eps=1e-12):
 
     print("\n===== FINAL RESULTS =====")
     print(f"SNR:   {summary['snr_enh']:.6f}")
-    print(f"ΔSNR:  {summary['snr_improve']:.6f}")
+    print(f"SNRI:  {summary['snr_improve']:.6f}")
     print(f"MAE:   {summary['mae']:.6f}")
     print(f"MSE:   {summary['mse']:.6f}")
     print(f"RMSE:  {summary['rmse']:.6f}")
@@ -415,17 +430,11 @@ def evaluate_full(model, test_loader, device, sample_rate, eps=1e-12):
 
 
 @torch.no_grad()
-def enhance_and_save(
-    model,
-    device,
-    test_files,
-    infer_loader,
-    suffix
-):
+def enhance_and_save(model, device, test_files, infer_loader, suffix):
     model.eval()
 
-    save_dir = os.path.join("results", suffix)
-    os.makedirs(save_dir, exist_ok=True)
+    save_dir = RES_DIR / suffix
+    save_dir.mkdir(parents=True, exist_ok=True)
 
     global_idx = 0
 
@@ -444,8 +453,7 @@ def enhance_and_save(
 
         # complex
         enhanced_complex = torch.complex(
-            enhanced * torch.cos(phase),
-            enhanced * torch.sin(phase)
+            enhanced * torch.cos(phase), enhanced * torch.sin(phase)
         )
 
         # wave
@@ -464,10 +472,11 @@ def enhance_and_save(
             else:
                 orig_name = f"sample_{global_idx}"
 
-            out_name = f"{orig_name}_{suffix}.wav"
-            out_path = os.path.join(save_dir, out_name)
-
-            sf.write(out_path, enhanced_wave_i, DatasetConfig.sample_rate)
+            sf.write(
+                save_dir / f"{orig_name}_{suffix}.wav",
+                enhanced_wave_i,
+                DatasetConfig.sample_rate,
+            )
 
             global_idx += 1
 
@@ -475,20 +484,14 @@ def enhance_and_save(
 
 
 @torch.no_grad()
-def enhance_and_plot(
-    model,
-    device,
-    test_files,
-    infer_loader,
-    suffix
-):
+def enhance_and_plot(model, device, test_files, infer_loader, suffix):
     model.eval()
 
-    fig_wave_dir = os.path.join("figures", "waveform_comparison", suffix)
-    fig_spec_dir = os.path.join("figures", "spectrogram_comparison", suffix)
+    fig_wave_dir = FIG_DIR / "waveform_comparison" / suffix
+    fig_spec_dir = FIG_DIR / "spectrogram_comparison" / suffix
 
-    os.makedirs(fig_wave_dir, exist_ok=True)
-    os.makedirs(fig_spec_dir, exist_ok=True)
+    fig_wave_dir.mkdir(parents=True, exist_ok=True)
+    fig_spec_dir.mkdir(parents=True, exist_ok=True)
 
     global_idx = 0
 
@@ -508,16 +511,13 @@ def enhance_and_plot(
 
         # complex
         noisy_complex = torch.complex(
-            noisy * torch.cos(phase),
-            noisy * torch.sin(phase)
+            noisy * torch.cos(phase), noisy * torch.sin(phase)
         )
         clean_complex = torch.complex(
-            clean * torch.cos(phase),
-            clean * torch.sin(phase)
+            clean * torch.cos(phase), clean * torch.sin(phase)
         )
         enhanced_complex = torch.complex(
-            enhanced * torch.cos(phase),
-            enhanced * torch.sin(phase)
+            enhanced * torch.cos(phase), enhanced * torch.sin(phase)
         )
 
         # wave
@@ -532,7 +532,7 @@ def enhance_and_plot(
                 int(lengths[i]),
                 noisy_wave.shape[1],
                 clean_wave.shape[1],
-                enhanced_wave.shape[1]
+                enhanced_wave.shape[1],
             )
 
             noisy_wave_i = normalize(noisy_wave[i][:L].cpu().numpy())
@@ -550,8 +550,8 @@ def enhance_and_plot(
                 noisy_wave_i,
                 enhanced_wave_i,
                 DatasetConfig.sample_rate,
-                os.path.join(fig_wave_dir, f"{orig_name}.png"),
-                title=f"{suffix}: {orig_name}.wav"
+                fig_wave_dir / f"{orig_name}.png",
+                title=f"{suffix}: {orig_name}.wav",
             )
 
             # plot spectrogram
@@ -560,174 +560,219 @@ def enhance_and_plot(
                 noisy_wave_i,
                 enhanced_wave_i,
                 DatasetConfig.sample_rate,
-                os.path.join(fig_spec_dir, f"{orig_name}.png"),
-                title=f"{suffix}: {orig_name}.wav"
+                fig_spec_dir / f"{orig_name}.png",
+                title=f"{suffix}: {orig_name}.wav",
             )
 
             global_idx += 1
 
-    print(f"Saved figures to: figures/")
+    print(f"Saved figures to: {FIG_DIR}")
+
+
+def run_model(
+    args, model, test_loader, infer_loader, infer_files, device, exp_name, eps=1e-12
+):
+    # playback / quick eval
+    if args.mode in ["play"]:
+        evaluate_and_play(
+            model, test_loader, device, num_examples=args.num_examples, eps=eps
+        )
+
+    # full evaluation
+    if args.mode in ["eval", "all"]:
+        df, summary = evaluate_full(
+            model, test_loader, device, DatasetConfig.sample_rate, eps=eps
+        )
+        save_to_csv(df, RES_DIR / f"eval_full_{exp_name}.csv")
+
+    # save audio
+    if args.mode in ["save", "all"]:
+        enhance_and_save(model, device, infer_files, infer_loader, suffix=exp_name)
+
+    # plot
+    if args.mode in ["plot", "all"]:
+        enhance_and_plot(model, device, infer_files, infer_loader, suffix=exp_name)
+
+    return summary if args.mode in ["full", "all"] else None
+
+
+def run_multi(args, configs, test_loader, infer_loader, infer_files, device):
+    all_results = {}
+
+    for config in configs:
+        print(f"\n====== Running: {config['name']} ======")
+
+        model = UNet(use_ca=config["use_ca"], use_sa=config["use_sa"]).to(device)
+
+        ckpt_path = CKPT_DIR / f"best_model_{config['name']}.pth"
+        model.load_state_dict(torch.load(ckpt_path, map_location=device))
+
+        summary = run_model(
+            args,
+            model,
+            test_loader,
+            infer_loader,
+            infer_files,
+            device,
+            exp_name=config["name"],
+            eps=EPS,
+        )
+
+        if summary is not None:
+            all_results[config["name"]] = summary
+
+        del model
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    if args.mode in ["full", "all"] and all_results:
+        summary_df = pd.DataFrame(all_results).T
+        print(summary_df)
+
+        save_to_csv(summary_df, RES_DIR / "summary_compare.csv")
 
 
 # main
-def main(configs=None):
+def main(args, configs=None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    subset = load_subset(
-        DatasetConfig.test_txt,
-        noise_type=None,
-        snr=12.5
-    )
-
-    # _, test_loader = get_dataloaders(
-    #     # test_files=subset,
-    #     batch_size=BATCH_SIZE,
-    #     num_workers=NUM_WORKERS
-    # )
-
-    # if configs is None:
-    #     model = UNet().to(device)
-    #     model.load_state_dict(torch.load("ckpt/best_model_baseline.pth", map_location=device))
-
-    #     print("Loaded best model")
-
-    #     # evaluate_and_play(model, test_loader, device, eps=EPS)
-
-    #     df, summary = evaluate_full(model, test_loader, device, DatasetConfig.sample_rate, EPS)
-
-    #     save_to_csv(df, "results/eval_full_baseline.csv")
-    # else:
-    #     all_results = {}
-
-    #     for config in configs:
-    #         print(f"\n====== Evaluating: {config['name']} ======")
-
-    #         model = UNet(
-    #             use_ca=config["use_ca"],
-    #             use_sa=config["use_sa"]
-    #         ).to(device)
-
-    #         ckpt_path = f"ckpt/best_model_{config['name']}.pth"
-
-    #         model.load_state_dict(torch.load(ckpt_path, map_location=device))
-    #         print(f"Loaded {ckpt_path}")
-
-    #         df, summary = evaluate_full(
-    #             model,
-    #             test_loader,
-    #             device,
-    #             DatasetConfig.sample_rate,
-    #             EPS
-    #         )
-
-    #         save_path = f"results/eval_full_{config['name']}.csv"
-    #         save_to_csv(df, save_path)
-
-    #         all_results[config["name"]] = summary
-
-    #         del model
-    #         released = gc.collect()
-    #         torch.cuda.empty_cache()
-
-    #         print(f"\nCollected {released} objects.")
-        
-    #     summary_df = pd.DataFrame(all_results).T
-    #     save_to_csv(summary_df, "results/summary_compare.csv")
-
-    infer_files = ['p232_006', 'p232_290', 'p257_098']
-
-    # infer_loader
-    _, infer_loader = get_dataloaders(
-        test_files=infer_files,
-        batch_size=BATCH_SIZE,
-        num_workers=NUM_WORKERS
-    )
-
-    # print("\n===== GENERATING ENHANCED AUDIO =====")
-
-    # if configs is None:
-    #     model = UNet().to(device)
-    #     model.load_state_dict(torch.load("ckpt/best_model_baseline.pth", map_location=device))
-
-    #     enhance_and_save(
-    #         model,
-    #         device,
-    #         infer_files,
-    #         infer_loader,
-    #         suffix="baseline"
-    #     )
-
-    # else:
-    #     for config in configs:
-    #         print(f"\n------ Enhancing: {config['name']} ------")
-
-    #         model = UNet(
-    #             use_ca=config["use_ca"],
-    #             use_sa=config["use_sa"]
-    #         ).to(device)
-
-    #         ckpt_path = f"ckpt/best_model_{config['name']}.pth"
-    #         model.load_state_dict(torch.load(ckpt_path, map_location=device))
-
-    #         enhance_and_save(
-    #             model,
-    #             device,
-    #             infer_files,
-    #             infer_loader,
-    #             suffix=config["name"]
-    #         )
-
-    #         del model
-    #         released = gc.collect()
-    #         torch.cuda.empty_cache()
-
-    #         print(f"Collected {released} objects.")
-
-    print("\n===== GENERATING COMPARE PLOT =====")
-
-    if configs is None:
-        model = UNet().to(device)
-        model.load_state_dict(torch.load("ckpt/best_model_baseline.pth", map_location=device))
-
-        enhance_and_plot(
-            model,
-            device,
-            infer_files,
-            infer_loader,
-            suffix="baseline"
+    # ===== argument sanity check =====
+    if args.multi_run and (
+        args.manual_arch or args.use_ca or args.use_sa or args.exp_name != "baseline"
+    ):
+        print(
+            "[Warning] --multi_run enabled: using configs, ignoring manual_arch/use_ca/use_sa/exp_name"
         )
 
+    valid_num_examples_modes = ["play", "all"]
+
+    if args.mode not in valid_num_examples_modes and args.num_examples != 4:
+        print(
+            f"[Warning] --num_examples is ignored because mode='{args.mode}' "
+            f"(only {valid_num_examples_modes} uses num_examples)"
+        )
+
+    valid_subset_modes = ["play", "eval", "all"]
+
+    if args.use_subset and args.mode not in valid_subset_modes:
+        print(
+            f"[Warning] --use_subset is ignored because mode='{args.mode}' "
+            f"(only {valid_subset_modes} support subset)"
+        )
+        use_subset = False
     else:
-        for config in configs:
-            print(f"\n------ Enhancing: {config['name']} ------")
+        use_subset = args.use_subset
 
-            model = UNet(
-                use_ca=config["use_ca"],
-                use_sa=config["use_sa"]
-            ).to(device)
+    if not use_subset and args.snr != 12.5:
+        print("[Warning] --snr has no effect because subset is not enabled")
 
-            ckpt_path = f"ckpt/best_model_{config['name']}.pth"
-            model.load_state_dict(torch.load(ckpt_path, map_location=device))
+    # ===== test set =====
+    if use_subset:
+        print(f"Using subset with SNR={args.snr}")
+        test_files = load_subset(DatasetConfig.test_txt, noise_type=None, snr=args.snr)
+    else:
+        print("Using full test set")
+        test_files = None
 
-            enhance_and_plot(
-                model,
-                device,
-                infer_files,
-                infer_loader,
-                suffix=config["name"]
-            )
+    test_loader = get_testloader(
+        test_files=test_files, batch_size=args.batch_size, num_workers=args.num_workers
+    )
 
-            del model
-            released = gc.collect()
-            torch.cuda.empty_cache()
+    # ===== infer set =====
+    infer_files = ["p232_006", "p232_290", "p257_098"]
 
-            print(f"Collected {released} objects.")
+    infer_loader = get_testloader(
+        test_files=infer_files, batch_size=args.batch_size, num_workers=args.num_workers
+    )
+
+    if args.multi_run:
+        run_multi(args, configs, test_loader, infer_loader, infer_files, device)
+    else:
+        print(f"\n====== Running: {args.exp_name} ======")
+
+        config_map = {config["name"]: config for config in configs}
+
+        # ===== resolve config =====
+        manual_override = args.manual_arch
+
+        if manual_override:
+            use_ca = args.use_ca
+            use_sa = args.use_sa
+
+            print(f"[Warning] Manual architecture override: CA={use_ca}, SA={use_sa}")
+            print("[Warning] Ensure checkpoint matches architecture!")
+
+        else:
+            if args.exp_name not in config_map:
+                raise ValueError(
+                    f"Unknown exp_name={args.exp_name}, available: {list(config_map.keys())}"
+                )
+
+            use_ca = config_map[args.exp_name]["use_ca"]
+            use_sa = config_map[args.exp_name]["use_sa"]
+
+        # ===== model =====
+        model = UNet(use_ca=use_ca, use_sa=use_sa).to(device)
+
+        ckpt_path = CKPT_DIR / f"best_model_{args.exp_name}.pth"
+        model.load_state_dict(torch.load(ckpt_path, map_location=device))
+
+        run_model(
+            args,
+            model,
+            test_loader,
+            infer_loader,
+            infer_files,
+            device,
+            exp_name=args.exp_name,
+            eps=EPS,
+        )
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--num_workers", type=int, default=4)
+
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="all",
+        choices=["play", "eval", "save", "plot", "all"],
+    )
+
+    parser.add_argument("--multi_run", action="store_true")
+
+    parser.add_argument(
+        "--manual_arch", action="store_true", help="manually override CA/SA config"
+    )
+
+    parser.add_argument("--use_ca", action="store_true")
+    parser.add_argument("--use_sa", action="store_true")
+
+    parser.add_argument("--exp_name", type=str, default="baseline")
+
+    parser.add_argument("--num_examples", type=int, default=4)
+
+    parser.add_argument(
+        "--use_subset", action="store_true", help="Use subset instead of full test set"
+    )
+
+    parser.add_argument(
+        "--snr", type=float, default=12.5, help="SNR for subset generation"
+    )
+
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    BATCH_SIZE = 8
-    NUM_WORKERS = 4
     EPS = 1e-12
+
+    BASE_DIR = Path(__file__).resolve().parent.parent
+    CKPT_DIR = BASE_DIR / "ckpt"
+    RES_DIR = BASE_DIR / "results"
+    FIG_DIR = BASE_DIR / "figures"
 
     configs = [
         {"name": "baseline", "use_ca": False, "use_sa": False},
@@ -736,4 +781,6 @@ if __name__ == "__main__":
         {"name": "ca_sa", "use_ca": True, "use_sa": True},
     ]
 
-    main(configs)
+    args = parse_args()
+
+    main(args, configs)

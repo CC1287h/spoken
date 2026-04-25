@@ -16,11 +16,15 @@ class DatasetConfig:
     n_fft = 400
     hop_length = 160
     win_length = 400
-    window = "hann"   # hann / hamming / rectangular
+    window = "hann"  # hann / hamming / rectangular
 
     # Dataset paths
-    train_clean_dir = r"D:\Final Project\Dataset\clean_trainset_28spk_wav\clean_trainset_28spk_wav"
-    train_noisy_dir = r"D:\Final Project\Dataset\noisy_trainset_28spk_wav\noisy_trainset_28spk_wav"
+    train_clean_dir = (
+        r"D:\Final Project\Dataset\clean_trainset_28spk_wav\clean_trainset_28spk_wav"
+    )
+    train_noisy_dir = (
+        r"D:\Final Project\Dataset\noisy_trainset_28spk_wav\noisy_trainset_28spk_wav"
+    )
 
     test_clean_dir = r"D:\Final Project\Dataset\clean_testset_wav\clean_testset_wav"
     test_noisy_dir = r"D:\Final Project\Dataset\noisy_testset_wav\noisy_testset_wav"
@@ -58,7 +62,7 @@ class SpeechDataset(torch.utils.data.Dataset):
             self.window = torch.hann_window(DatasetConfig.n_fft)
         elif win_type == "hamming":
             self.window = torch.hamming_window(DatasetConfig.n_fft)
-        elif win_type  == "rectangular":
+        elif win_type == "rectangular":
             self.window = torch.ones(DatasetConfig.n_fft)
         else:
             raise ValueError(f"Unknown window type: {DatasetConfig.window}")
@@ -66,10 +70,8 @@ class SpeechDataset(torch.utils.data.Dataset):
         self.n_fft = DatasetConfig.n_fft
         self.hop_length = DatasetConfig.hop_length
 
-
     def resolve_wav(self, filename):
         return filename if filename.endswith(".wav") else filename + ".wav"
-
 
     def load_wav(self, path, eps=1e-12):
         wav, sr = sf.read(path)
@@ -84,8 +86,7 @@ class SpeechDataset(torch.utils.data.Dataset):
         if sr != DatasetConfig.sample_rate:
             if sr not in self.resamplers:
                 self.resamplers[sr] = torchaudio.transforms.Resample(
-                    orig_freq=sr,
-                    new_freq=DatasetConfig.sample_rate
+                    orig_freq=sr, new_freq=DatasetConfig.sample_rate
                 )
 
             wav = self.resamplers[sr](wav.unsqueeze(0)).squeeze(0)
@@ -95,10 +96,8 @@ class SpeechDataset(torch.utils.data.Dataset):
 
         return wav
 
-
     def __len__(self):
         return len(self.files)
-
 
     def __getitem__(self, idx):
         filename = self.resolve_wav(self.files[idx])
@@ -113,19 +112,25 @@ class SpeechDataset(torch.utils.data.Dataset):
         noisy = noisy.unsqueeze(0)
         clean = clean.unsqueeze(0)
 
-        noisy_spec = torch.stft(noisy[0], n_fft=self.n_fft,
-                                hop_length=self.hop_length,
-                                window=self.window,
-                                return_complex=True)
+        noisy_spec = torch.stft(
+            noisy[0],
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+            window=self.window,
+            return_complex=True,
+        )
 
-        clean_spec = torch.stft(clean[0], n_fft=self.n_fft,
-                                hop_length=self.hop_length,
-                                window=self.window,
-                                return_complex=True)
+        clean_spec = torch.stft(
+            clean[0],
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+            window=self.window,
+            return_complex=True,
+        )
 
         noisy_real = noisy_spec.real
         noisy_imag = noisy_spec.imag
-        
+
         clean_real = clean_spec.real
         clean_imag = clean_spec.imag
 
@@ -135,8 +140,8 @@ class SpeechDataset(torch.utils.data.Dataset):
             "clean_real": clean_real,
             "clean_imag": clean_imag,
             "spec_length": noisy_spec.shape[-1],
-            "wave_length": wave_lengths
-            }
+            "wave_length": wave_lengths,
+        }
 
 
 def collate_fn(batch):
@@ -163,12 +168,15 @@ def collate_fn(batch):
 
 
 class BucketBatchSampler(Sampler):
-    def __init__(self, lengths, batch_size, shuffle=True, drop_last=False, bucket_size=50, seed=42):
-        """
-        lengths: list[int] 每个样本的 T
-        batch_size: batch大小
-        bucket_size: 每个 bucket 内排序范围
-        """
+    def __init__(
+        self,
+        lengths,
+        batch_size,
+        shuffle=True,
+        drop_last=False,
+        bucket_size=50,
+        seed=42,
+    ):
         self.lengths = lengths
         self.batch_size = batch_size
         self.shuffle = shuffle
@@ -183,7 +191,7 @@ class BucketBatchSampler(Sampler):
 
         buckets = []
         for i in range(0, len(sorted_indices), self.bucket_size):
-            buckets.append(sorted_indices[i:i + self.bucket_size])
+            buckets.append(sorted_indices[i : i + self.bucket_size])
 
         return buckets
 
@@ -200,7 +208,7 @@ class BucketBatchSampler(Sampler):
                 self.rng.shuffle(bucket)
 
             for i in range(0, len(bucket), self.batch_size):
-                batch = bucket[i:i + self.batch_size]
+                batch = bucket[i : i + self.batch_size]
 
                 if len(batch) == self.batch_size or not self.drop_last:
                     batch_list.append(batch)
@@ -232,7 +240,7 @@ def get_dataloaders(
     train_files=None,
     test_files=None,
     batch_size=8,
-    num_workers=4
+    num_workers=4,
 ):
     train_dataset = SpeechDataset(train_clean_dir, train_noisy_dir, train_files)
     test_dataset = SpeechDataset(test_clean_dir, test_noisy_dir, test_files)
@@ -241,8 +249,8 @@ def get_dataloaders(
         lengths=train_dataset.lengths,
         batch_size=batch_size,
         bucket_size=100,
-        shuffle=True
-        )
+        shuffle=True,
+    )
 
     train_loader = DataLoader(
         train_dataset,
@@ -251,7 +259,7 @@ def get_dataloaders(
         collate_fn=collate_fn,
         pin_memory=True,
         persistent_workers=True,
-        worker_init_fn=worker_init_fn
+        worker_init_fn=worker_init_fn,
     )
 
     test_loader = DataLoader(
@@ -262,16 +270,68 @@ def get_dataloaders(
         collate_fn=collate_fn,
         pin_memory=True,
         persistent_workers=True,
-        worker_init_fn=worker_init_fn
+        worker_init_fn=worker_init_fn,
     )
 
     return train_loader, test_loader
 
 
+def get_trainloader(
+    train_clean_dir=DatasetConfig.train_clean_dir,
+    train_noisy_dir=DatasetConfig.train_noisy_dir,
+    train_files=None,
+    batch_size=8,
+    num_workers=4,
+):
+    train_dataset = SpeechDataset(train_clean_dir, train_noisy_dir, train_files)
+
+    sampler = BucketBatchSampler(
+        lengths=train_dataset.lengths,
+        batch_size=batch_size,
+        bucket_size=100,
+        shuffle=True,
+    )
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_sampler=sampler,
+        num_workers=num_workers,
+        collate_fn=collate_fn,
+        pin_memory=True,
+        persistent_workers=True,
+        worker_init_fn=worker_init_fn,
+    )
+
+    return train_loader
+
+
+def get_testloader(
+    test_clean_dir=DatasetConfig.test_clean_dir,
+    test_noisy_dir=DatasetConfig.test_noisy_dir,
+    test_files=None,
+    batch_size=8,
+    num_workers=4,
+):
+    test_dataset = SpeechDataset(test_clean_dir, test_noisy_dir, test_files)
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        collate_fn=collate_fn,
+        pin_memory=True,
+        persistent_workers=True,
+        worker_init_fn=worker_init_fn,
+    )
+
+    return test_loader
+
+
 def load_subset(txt_path, noise_type=None, snr=None):
     items = []
 
-    with open(txt_path, 'r') as f:
+    with open(txt_path, "r") as f:
         for line in f:
             name, noise, snr_val = line.strip().split()
 

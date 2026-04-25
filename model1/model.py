@@ -11,7 +11,7 @@ class SEBlock(nn.Module):
             nn.Conv2d(channels, channels // reduction, 1),
             nn.ReLU(),
             nn.Conv2d(channels // reduction, channels, 1),
-            nn.Sigmoid()
+            nn.Sigmoid(),
         )
 
     def forward(self, x):
@@ -24,11 +24,7 @@ class AttentionGate(nn.Module):
         super().__init__()
         self.W_g = nn.Conv2d(F_g, F_int, 1)
         self.W_x = nn.Conv2d(F_l, F_int, 1)
-        self.psi = nn.Sequential(
-            nn.ReLU(),
-            nn.Conv2d(F_int, 1, 1),
-            nn.Sigmoid()
-        )
+        self.psi = nn.Sequential(nn.ReLU(), nn.Conv2d(F_int, 1, 1), nn.Sigmoid())
 
     def forward(self, g, x):
         g1 = self.W_g(g)
@@ -46,7 +42,6 @@ class DoubleConv(nn.Module):
             nn.Conv2d(in_channels, out_channels, 3, padding=1),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
-
             nn.Conv2d(out_channels, out_channels, 3, padding=1),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
@@ -67,7 +62,7 @@ class UNet(nn.Module):
     def __init__(self, use_ca=False, use_sa=False):
         super().__init__()
 
-        self.use_skip_attn = use_sa
+        self.use_sa = use_sa
 
         # Encoder
         self.enc1 = DoubleConv(1, 32, use_ca)
@@ -113,7 +108,7 @@ class UNet(nn.Module):
         d3 = self.up3(b)
         d3, e3 = match_shape(d3, e3)
 
-        if self.use_skip_attn:
+        if self.use_sa:
             e3 = self.att3(d3, e3)
 
         d3 = torch.cat([d3, e3], dim=1)
@@ -122,7 +117,7 @@ class UNet(nn.Module):
         d2 = self.up2(d3)
         d2, e2 = match_shape(d2, e2)
 
-        if self.use_skip_attn:
+        if self.use_sa:
             e2 = self.att2(d2, e2)
 
         d2 = torch.cat([d2, e2], dim=1)
@@ -131,7 +126,7 @@ class UNet(nn.Module):
         d1 = self.up1(d2)
         d1, e1 = match_shape(d1, e1)
 
-        if self.use_skip_attn:
+        if self.use_sa:
             e1 = self.att1(d1, e1)
 
         d1 = torch.cat([d1, e1], dim=1)
@@ -139,7 +134,9 @@ class UNet(nn.Module):
 
         # Output
         out = self.out_conv(d1)
-        out = F.interpolate(out, size=input_shape[2:], mode="bilinear", align_corners=False)
+        out = F.interpolate(
+            out, size=input_shape[2:], mode="bilinear", align_corners=False
+        )
         out = torch.sigmoid(out)
 
         return out

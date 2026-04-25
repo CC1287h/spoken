@@ -11,7 +11,6 @@ class DoubleConv(nn.Module):
             nn.Conv2d(in_channels, out_channels, 3, padding=1),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
-
             nn.Conv2d(out_channels, out_channels, 3, padding=1),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
@@ -82,8 +81,12 @@ class UNet(nn.Module):
         imag = self.imag_head(d1)
 
         # ===== resize =====
-        real = F.interpolate(real, size=self.input_shape[2:], mode="bilinear", align_corners=False)
-        imag = F.interpolate(imag, size=self.input_shape[2:], mode="bilinear", align_corners=False)
+        real = F.interpolate(
+            real, size=self.input_shape[2:], mode="bilinear", align_corners=False
+        )
+        imag = F.interpolate(
+            imag, size=self.input_shape[2:], mode="bilinear", align_corners=False
+        )
 
         # ===== activation =====
         real = torch.tanh(real)

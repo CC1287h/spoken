@@ -1,6 +1,7 @@
-import gc
+import argparse
 import numpy as np
 import os
+from pathlib import Path
 import random
 import torch
 import torch.nn.functional as F
@@ -28,7 +29,7 @@ def istft_reconstruct(complex_spec):
         window = torch.hann_window(DatasetConfig.n_fft, device=complex_spec.device)
     elif win_type == "hamming":
         window = torch.hamming_window(DatasetConfig.n_fft, device=complex_spec.device)
-    elif win_type  == "rectangular":
+    elif win_type == "rectangular":
         window = torch.ones(DatasetConfig.n_fft, device=complex_spec.device)
     else:
         raise ValueError(f"Unknown window type: {DatasetConfig.window}")
@@ -39,7 +40,7 @@ def istft_reconstruct(complex_spec):
         hop_length=DatasetConfig.hop_length,
         win_length=DatasetConfig.win_length,
         window=window,
-        length=None
+        length=None,
     )
     return wav
 
@@ -52,14 +53,14 @@ def si_sdr_loss(pred, target, eps=1e-12, reduction="mean"):
 
     # projection
     dot = torch.sum(pred * target, dim=1, keepdim=True)
-    target_energy = torch.sum(target ** 2, dim=1, keepdim=True) + eps
+    target_energy = torch.sum(target**2, dim=1, keepdim=True) + eps
 
     scale = dot / target_energy
     proj = scale * target
 
     noise = pred - proj
 
-    ratio = torch.sum(proj ** 2, dim=1) / (torch.sum(noise ** 2, dim=1) + eps)
+    ratio = torch.sum(proj**2, dim=1) / (torch.sum(noise**2, dim=1) + eps)
 
     si_sdr = 10 * torch.log10(ratio + eps)
 
@@ -74,34 +75,32 @@ def si_sdr_loss(pred, target, eps=1e-12, reduction="mean"):
 
 
 # ===== train a epoch =====
-def train_epoch(model, train_loader, optimizer, device,
-                lambda1=1.0, lambda2=0.005, lambda3=0.0, eps=1e-12):
+def train_epoch(
+    model,
+    train_loader,
+    optimizer,
+    device,
+    lambda1=1.0,
+    lambda2=0.005,
+    lambda3=5.0,
+    eps=1e-12,
+):
     model.train()
     total_loss = 0
 
-    for noisy, clean, phase, mask, _ in tqdm(train_loader, desc="Train"):
+    for noisy, clean, mask, _ in tqdm(train_loader, desc="Train"):
         noisy = noisy.to(device)
         clean = clean.to(device)
-        phase = phase.to(device)
         mask = mask.to(device)
 
         # forward
         pred_mask = model(noisy)
-        enhanced = pred_mask * noisy
-
-        clean = clean.squeeze(1)
-        enhanced = enhanced.squeeze(1)
-        phase = phase.squeeze(1)
+        pred_mask = pred_mask.squeeze(1)
 
         # complex
-        clean_complex = torch.complex(
-            clean * torch.cos(phase),
-            clean * torch.sin(phase)
-        )
-        enhanced_complex = torch.complex(
-            enhanced * torch.cos(phase),
-            enhanced * torch.sin(phase)
-        )
+        noisy_complex = torch.complex(noisy[:, 0], noisy[:, 1])
+        clean_complex = torch.complex(clean[:, 0], clean[:, 1])
+        enhanced_complex = pred_mask * noisy_complex
 
         # waveform
         clean_wave = istft_reconstruct(clean_complex)
@@ -113,15 +112,22 @@ def train_epoch(model, train_loader, optimizer, device,
         clean_log = torch.log(clean_mag + eps)
         enhanced_log = torch.log(enhanced_mag + eps)
 
-        sisdr_loss  = si_sdr_loss(enhanced_wave, clean_wave, eps)
+        sisdr_loss = si_sdr_loss(enhanced_wave, clean_wave, eps)
 
         spec_loss = torch.abs(enhanced_log - clean_log)
         spec_loss = spec_loss * mask
         spec_loss = spec_loss.sum() / mask.sum()
 
-        complex_loss = torch.mean(torch.abs(enhanced_complex - clean_complex))
+        num = torch.real(enhanced_complex * torch.conj(clean_complex))
+        den = torch.abs(enhanced_complex) * torch.abs(clean_complex) + eps
+        phase_loss = 1 - (num / den)
+        phase_loss = phase_loss.mean()
+        mag_gt = torch.abs(clean_complex)
+        phase_mask = (mag_gt > mag_gt.mean()).float()
+        phase_loss = phase_loss * phase_mask
+        phase_loss = phase_loss.sum() / (phase_mask.sum() + eps)
 
-        loss = lambda1 * sisdr_loss + lambda2 * spec_loss + lambda3 * complex_loss
+        loss = lambda1 * sisdr_loss + lambda2 * spec_loss + lambda3 * phase_loss
 
         # backward
         optimizer.zero_grad()
@@ -135,34 +141,25 @@ def train_epoch(model, train_loader, optimizer, device,
 
 # ===== evaluate =====
 @torch.no_grad()
-def evaluate(model, test_loader, device,
-             lambda1=1.0, lambda2=0.005, lambda3=0.0, eps=1e-12):
+def evaluate(
+    model, test_loader, device, lambda1=1.0, lambda2=0.005, lambda3=5.0, eps=1e-12
+):
     model.eval()
     total_loss = 0
 
-    for noisy, clean, phase, mask, _ in tqdm(test_loader, desc="Eval"):
+    for noisy, clean, mask, _ in tqdm(test_loader, desc="Eval"):
         noisy = noisy.to(device)
         clean = clean.to(device)
-        phase = phase.to(device)
         mask = mask.to(device)
 
         # forward
         pred_mask = model(noisy)
-        enhanced = pred_mask * noisy
-
-        clean = clean.squeeze(1)
-        enhanced = enhanced.squeeze(1)
-        phase = phase.squeeze(1)
+        pred_mask = pred_mask.squeeze(1)
 
         # complex
-        clean_complex = torch.complex(
-            clean.squeeze(1) * torch.cos(phase),
-            clean.squeeze(1) * torch.sin(phase)
-        )
-        enhanced_complex = torch.complex(
-            enhanced.squeeze(1) * torch.cos(phase),
-            enhanced.squeeze(1) * torch.sin(phase)
-        )
+        noisy_complex = torch.complex(noisy[:, 0], noisy[:, 1]).to(device)
+        clean_complex = torch.complex(clean[:, 0], clean[:, 1]).to(device)
+        enhanced_complex = pred_mask * noisy_complex
 
         # waveform
         clean_wave = istft_reconstruct(clean_complex)
@@ -174,15 +171,22 @@ def evaluate(model, test_loader, device,
         clean_log = torch.log(clean_mag + eps)
         enhanced_log = torch.log(enhanced_mag + eps)
 
-        sisdr_loss  = si_sdr_loss(enhanced_wave, clean_wave, eps)
+        sisdr_loss = si_sdr_loss(enhanced_wave, clean_wave, eps)
 
         spec_loss = torch.abs(enhanced_log - clean_log)
         spec_loss = spec_loss * mask
         spec_loss = spec_loss.sum() / mask.sum()
 
-        complex_loss = torch.mean(torch.abs(enhanced_complex - clean_complex))
+        num = torch.real(enhanced_complex * torch.conj(clean_complex))
+        den = torch.abs(enhanced_complex) * torch.abs(clean_complex) + eps
+        phase_loss = 1 - (num / den)
+        phase_loss = phase_loss.mean()
+        mag_gt = torch.abs(clean_complex)
+        phase_mask = (mag_gt > mag_gt.mean()).float()
+        phase_loss = phase_loss * phase_mask
+        phase_loss = phase_loss.sum() / (phase_mask.sum() + eps)
 
-        loss = lambda1 * sisdr_loss + lambda2 * spec_loss + lambda3 * complex_loss
+        loss = lambda1 * sisdr_loss + lambda2 * spec_loss + lambda3 * phase_loss
 
         total_loss += loss.item()
 
@@ -190,13 +194,24 @@ def evaluate(model, test_loader, device,
 
 
 # ===== train =====
-def train(model, train_loader, test_loader, optimizer, device, eps=1e-12, save_path='ckpt/default.pth'):
+def train(
+    args, model, train_loader, test_loader, optimizer, device, save_path, eps=1e-12
+):
     best_loss = float("inf")
 
-    for epoch in range(EPOCHS):
-        print(f"\n===== Epoch {epoch+1}/{EPOCHS} =====")
+    for epoch in range(args.epochs):
+        print(f"\n===== Epoch {epoch+1}/{args.epochs} =====")
 
-        train_loss = train_epoch(model, train_loader, optimizer, device, eps)
+        train_loss = train_epoch(
+            model,
+            train_loader,
+            optimizer,
+            device,
+            args.lambda1,
+            args.lambda2,
+            args.lambda3,
+            eps,
+        )
         val_loss = evaluate(model, test_loader, device, eps)
 
         print(f"Train Loss: {train_loss:.4f}")
@@ -205,81 +220,53 @@ def train(model, train_loader, test_loader, optimizer, device, eps=1e-12, save_p
         # ===== save best model =====
         if val_loss < best_loss:
             best_loss = val_loss
-            os.makedirs("ckpt", exist_ok=True)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
 
             torch.save(model.state_dict(), save_path)
             print(f"Saved best model to {save_path}")
-        
-    return best_loss
 
 
-def main(configs=None):
+def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train_loader, test_loader = get_dataloaders(
-        batch_size=BATCH_SIZE,
-        num_workers=NUM_WORKERS
+        batch_size=args.batch_size, num_workers=args.num_workers
     )
 
-    if configs is None:
-        model = UNet().to(device)
+    model = UNet().to(device)
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=LR)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
-        train(model, train_loader, test_loader, optimizer, device, EPS, "ckpt/best_model_baseline.pth")
-    else:
-        results = {}
+    save_path = CKPT_DIR / f"best_model_{args.exp_name}.pth"
 
-        for config in configs:
-            print(f"\n====== Running: {config['name']} ======")
+    train(args, model, train_loader, test_loader, optimizer, device, save_path, EPS)
 
-            model = UNet(
-                use_ca=config["use_ca"],
-                use_sa=config["use_sa"]
-            ).to(device)
 
-            optimizer = torch.optim.Adam(model.parameters(), lr=LR)
+def parse_args():
+    parser = argparse.ArgumentParser()
 
-            save_path = f"ckpt/best_model_{config['name']}.pth"
+    parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--epochs", type=int, default=10)
 
-            best_loss = train(
-                model,
-                train_loader,
-                test_loader,
-                optimizer,
-                device,
-                eps=EPS,
-                save_path=save_path
-            )
+    parser.add_argument("--lambda1", type=float, default=1.0)
+    parser.add_argument("--lambda2", type=float, default=0.0005)
+    parser.add_argument("--lambda3", type=float, default=5.0)
 
-            results[config["name"]] = best_loss
+    parser.add_argument("--exp_name", type=str, default="complex")
 
-            del model
-            del optimizer
-            released = gc.collect()
-            torch.cuda.empty_cache()
-
-            print(f"\nCollected {released} objects.")
-        
-        print("\n===== FINAL RESULTS =====")
-        for k, v in results.items():
-            print(f"loss_{k}: {v:.4f}")
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    BATCH_SIZE = 8
-    NUM_WORKERS = 4
-    LR = 1e-3
-    EPOCHS = 10
     EPS = 1e-12
 
-    configs = [
-        {"name": "baseline", "use_ca": False, "use_sa": False},
-        {"name": "ca", "use_ca": True, "use_sa": False},
-        {"name": "sa", "use_ca": False, "use_sa": True},
-        {"name": "ca_sa", "use_ca": True, "use_sa": True},
-    ]
+    BASE_DIR = Path(__file__).resolve().parent.parent
+    CKPT_DIR = BASE_DIR / "ckpt"
 
     set_seed(42)
 
-    main(configs)
+    args = parse_args()
+
+    main()
